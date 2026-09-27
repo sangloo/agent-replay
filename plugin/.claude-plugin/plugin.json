@@ -1,0 +1,10 @@
+{
+  "name": "replay",
+  "displayName": "Replay",
+  "description": "Capture every session as a replay a reviewer can play back change by change, with notes on the steps that need a careful look.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://github.com/sangloo/agent-replay",
+  "repository": "https://github.com/sangloo/agent-replay",
+  "keywords": ["review", "replay", "code-review"]
+}

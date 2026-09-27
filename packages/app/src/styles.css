@@ -1,0 +1,250 @@
+/*
+ * The player's whole visual vocabulary: a handful of semantic colours defined
+ * once per theme, and registered with Tailwind so components name the role
+ * (`bg-surface-low`, `text-text-mid`) and never a raw value. Switching theme
+ * is the `.dark` class on <html>; nothing else changes.
+ */
+@import "tailwindcss";
+
+@source "./";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@font-face {
+  font-family: "Geist";
+  src: url("geist-fonts/geist-sans/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("geist-fonts/geist-mono/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+
+  --surface-base: oklch(0.992 0.001 260);
+  --surface-low: oklch(0.974 0.003 260);
+  --surface-mid: oklch(0.955 0.004 260);
+  --surface-raised: oklch(1 0 0);
+
+  --line: oklch(0.915 0.005 260);
+  --line-high: oklch(0.86 0.007 260);
+  --line-control: oklch(0.7 0.01 260);
+
+  --text-high: oklch(0.22 0.012 260);
+  --text-mid: oklch(0.41 0.014 260);
+  --text-low: oklch(0.53 0.014 260);
+
+  --hover: oklch(0.94 0.005 260);
+  --active: oklch(0.905 0.008 260);
+
+  /* The one colour that means "now": the caret, the playhead, the step on screen. */
+  --emphasis: oklch(0.55 0.21 268);
+  --emphasis-subtle: oklch(0.55 0.21 268 / 0.1);
+  --accent: oklch(0.26 0.014 260);
+  --accent-hover: oklch(0.34 0.014 260);
+  --accent-text: oklch(0.98 0.003 260);
+
+  --success: oklch(0.62 0.16 150);
+  --success-subtle: oklch(0.7 0.17 150 / 0.15);
+  --success-ink: oklch(0.44 0.12 150);
+  --success-line: oklch(0.62 0.16 150 / 0.45);
+
+  --warning: oklch(0.76 0.15 75);
+  --warning-subtle: oklch(0.82 0.15 85 / 0.2);
+  --warning-ink: oklch(0.49 0.11 65);
+  --warning-line: oklch(0.7 0.14 75 / 0.5);
+
+  --danger: oklch(0.6 0.2 27);
+  --danger-subtle: oklch(0.66 0.2 25 / 0.13);
+  --danger-ink: oklch(0.5 0.18 27);
+  --danger-line: oklch(0.6 0.2 27 / 0.45);
+
+  --info: oklch(0.6 0.15 240);
+  --info-subtle: oklch(0.65 0.14 240 / 0.12);
+  --info-ink: oklch(0.47 0.13 245);
+  --info-line: oklch(0.6 0.15 240 / 0.45);
+
+  /* Syntax. */
+  --syntax-keyword: oklch(0.5 0.2 295);
+  --syntax-type: oklch(0.5 0.11 200);
+  --syntax-attr: oklch(0.5 0.16 340);
+  --syntax-title: oklch(0.47 0.14 250);
+  --syntax-string: oklch(0.47 0.12 150);
+  --syntax-number: oklch(0.52 0.13 55);
+  --syntax-regexp: oklch(0.5 0.18 27);
+
+  --shadow-popover: 0 1px 2px oklch(0 0 0 / 0.06), 0 8px 24px -4px oklch(0 0 0 / 0.14);
+  --shadow-modal: 0 2px 6px oklch(0 0 0 / 0.08), 0 24px 64px -12px oklch(0 0 0 / 0.3);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface-base: oklch(0.175 0.006 265);
+  --surface-low: oklch(0.2 0.007 265);
+  --surface-mid: oklch(0.235 0.008 265);
+  --surface-raised: oklch(0.23 0.008 265);
+
+  --line: oklch(0.285 0.009 265);
+  --line-high: oklch(0.345 0.01 265);
+  --line-control: oklch(0.5 0.012 265);
+
+  --text-high: oklch(0.945 0.004 265);
+  --text-mid: oklch(0.8 0.008 265);
+  --text-low: oklch(0.66 0.01 265);
+
+  --hover: oklch(0.255 0.008 265);
+  --active: oklch(0.3 0.01 265);
+
+  --emphasis: oklch(0.72 0.15 268);
+  --emphasis-subtle: oklch(0.72 0.15 268 / 0.14);
+  --accent: oklch(0.93 0.004 265);
+  --accent-hover: oklch(0.86 0.006 265);
+  --accent-text: oklch(0.18 0.006 265);
+
+  --success: oklch(0.7 0.16 150);
+  --success-subtle: oklch(0.7 0.17 150 / 0.17);
+  --success-ink: oklch(0.8 0.14 150);
+  --success-line: oklch(0.7 0.16 150 / 0.45);
+
+  --warning: oklch(0.8 0.14 80);
+  --warning-subtle: oklch(0.8 0.14 80 / 0.14);
+  --warning-ink: oklch(0.84 0.12 85);
+  --warning-line: oklch(0.8 0.14 80 / 0.4);
+
+  --danger: oklch(0.66 0.19 25);
+  --danger-subtle: oklch(0.66 0.2 25 / 0.19);
+  --danger-ink: oklch(0.77 0.14 25);
+  --danger-line: oklch(0.66 0.19 25 / 0.45);
+
+  --info: oklch(0.7 0.13 240);
+  --info-subtle: oklch(0.7 0.13 240 / 0.15);
+  --info-ink: oklch(0.79 0.11 240);
+  --info-line: oklch(0.7 0.13 240 / 0.45);
+
+  --syntax-keyword: oklch(0.78 0.13 300);
+  --syntax-type: oklch(0.8 0.1 195);
+  --syntax-attr: oklch(0.79 0.12 345);
+  --syntax-title: oklch(0.8 0.1 245);
+  --syntax-string: oklch(0.8 0.12 145);
+  --syntax-number: oklch(0.82 0.11 65);
+  --syntax-regexp: oklch(0.78 0.13 25);
+
+  --shadow-popover: 0 1px 2px oklch(0 0 0 / 0.3), 0 8px 24px -4px oklch(0 0 0 / 0.5);
+  --shadow-modal: 0 2px 6px oklch(0 0 0 / 0.3), 0 24px 64px -12px oklch(0 0 0 / 0.6);
+}
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-code: 0.8125rem;
+  --text-code--line-height: 1.375rem;
+
+  --radius-control: 6px;
+  --radius-panel: 10px;
+  --radius-surface: 12px;
+
+  --shadow-popover: var(--shadow-popover);
+  --shadow-modal: var(--shadow-modal);
+
+  --color-surface-base: var(--surface-base);
+  --color-surface-low: var(--surface-low);
+  --color-surface-mid: var(--surface-mid);
+  --color-surface-raised: var(--surface-raised);
+  --color-line: var(--line);
+  --color-line-high: var(--line-high);
+  --color-line-control: var(--line-control);
+  --color-text-high: var(--text-high);
+  --color-text-mid: var(--text-mid);
+  --color-text-low: var(--text-low);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-emphasis: var(--emphasis);
+  --color-emphasis-subtle: var(--emphasis-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-ink: var(--success-ink);
+  --color-success-line: var(--success-line);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-warning-ink: var(--warning-ink);
+  --color-warning-line: var(--warning-line);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-danger-ink: var(--danger-ink);
+  --color-danger-line: var(--danger-line);
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --color-info-ink: var(--info-ink);
+  --color-info-line: var(--info-line);
+  --color-syntax-keyword: var(--syntax-keyword);
+  --color-syntax-type: var(--syntax-type);
+  --color-syntax-attr: var(--syntax-attr);
+  --color-syntax-title: var(--syntax-title);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-number: var(--syntax-number);
+  --color-syntax-regexp: var(--syntax-regexp);
+}
+
+/* Layers, named. */
+@utility z-raised {
+  z-index: 10;
+}
+@utility z-overlay {
+  z-index: 50;
+}
+
+@utility duration-fast {
+  transition-duration: 120ms;
+}
+
+@utility icon-sm {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* A visible keyboard focus, inside the element so no parent clips it. */
+@utility focus-bar {
+  &:focus-visible {
+    outline: 2px solid var(--emphasis);
+    outline-offset: -2px;
+  }
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--surface-base);
+    color: var(--text-high);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--emphasis);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--emphasis-subtle);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-high) transparent;
+  }
+}

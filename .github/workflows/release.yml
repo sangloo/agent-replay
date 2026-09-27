@@ -1,0 +1,51 @@
+name: Release
+
+# Publishes the `agentreplay` npm package (see packages/app/scripts/package.mjs)
+# and attaches the tarball to a GitHub release. Runs when a `v*` tag is pushed:
+# bump the version in packages/app/publish.json, tag `v<version>`, push the tag.
+# Needs an `NPM_TOKEN` repository secret with publish rights to the package.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm package
+
+      # The tag and the manifest must agree, or the release names a version
+      # npm never received.
+      - name: Check the tag matches publish.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(node -p "require('./packages/app/publish.json').version")
+          test "${GITHUB_REF_NAME}" = "v${version}"
+
+      - run: npm publish --provenance --access public
+        working-directory: packages/app/.package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - if: startsWith(github.ref, 'refs/tags/')
+        run: gh release create "$GITHUB_REF_NAME" packages/app/.package/*.tgz --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

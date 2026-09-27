@@ -1,0 +1,21 @@
+{
+  "name": "agentreplay",
+  "version": "0.1.0",
+  "description": "Replay what a coding agent did, change by change — Claude Code, Codex and Gemini CLI sessions, and git history.",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "gemini-cli",
+    "code-review",
+    "ai-agents",
+    "replay",
+    "git"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sangloo/agent-replay.git"
+  },
+  "homepage": "https://github.com/sangloo/agent-replay#readme",
+  "bugs": "https://github.com/sangloo/agent-replay/issues"
+}

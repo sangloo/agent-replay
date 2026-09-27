@@ -1,0 +1,19 @@
+{
+  "name": "agent-replay",
+  "owner": {
+    "name": "Agent Replay"
+  },
+  "metadata": {
+    "description": "Replay what a coding agent did, change by change."
+  },
+  "plugins": [
+    {
+      "name": "replay",
+      "source": "./plugin",
+      "description": "Capture every session as a replay a reviewer can play back change by change, with notes on the steps that need a careful look.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "keywords": ["review", "replay", "code-review"]
+    }
+  ]
+}

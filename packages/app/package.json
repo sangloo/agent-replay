@@ -1,0 +1,48 @@
+{
+  "name": "@agent-replay/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The replay CLI, its local service and the player.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "replay": "./bin/replay.mjs"
+  },
+  "scripts": {
+    "dev": "vite --port 5180",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 5180",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "package": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "@agent-replay/core": "workspace:*",
+    "@anthropic-ai/sdk": "^0.128.0",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-popover": "^1.1.16",
+    "@radix-ui/react-select": "^2.2.6",
+    "clsx": "^2.1.1",
+    "geist": "^1.7.2",
+    "lowlight": "^3.3.0",
+    "lucide-react": "^1.26.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}
