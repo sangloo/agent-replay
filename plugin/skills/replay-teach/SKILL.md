@@ -42,9 +42,9 @@ replay course start --title "…" --path packages/core --to v2.0   # part of it,
 ```
 
 It prints every file to build **in build order** (what a file uses comes
-before it). That is a starting point, not the lesson plan. Plan 4–15 lessons,
+before it). That is a starting point, not the lesson plan. Plan 3–15 lessons,
 each one idea a learner can hold at once, ordered so every lesson builds only
-on what came before:
+on what came before. For a whole repository:
 
 1. What the project is (README), and the shape of the repository.
 2. The data model: core types, what each field means and why it exists.
@@ -53,8 +53,13 @@ on what came before:
 5. The edges: I/O, CLI, UI, network — how the core meets the world.
 6. How it is tested, and how to run it.
 
+For a course scoped to one module (`--path`): what problem it solves and
+where it sits, its types, its algorithm in the order it is easiest to
+understand, then its tests as a specification.
+
 A large repository gets several courses (one per package, with `--path`),
-not one enormous one.
+not one enormous one. The newest course is the one every command works on;
+`--course <name>` picks another (`start` prints the names).
 
 ## 2. Write each lesson
 
@@ -70,7 +75,7 @@ replay course explain - <<'MD'
 A **vector** in the plane is an ordered pair $(x, y)$ …
 MD
 
-replay course outline src/vec.ts                   # numbered lines + where each definition starts
+replay course outline src/vec.ts                   # each definition's lines, and the file numbered
 replay course take src/vec.ts --lines 1-4          # just the type, first
 replay course explain --file src/vec.ts --lines 1-4 - <<'MD'
 Two numbers and nothing else: …
@@ -87,19 +92,37 @@ replay course take src/vec.ts                      # the rest of the file
   several ranges; they arrive in file order). A 400-line file should arrive
   in several takes, each followed by an explanation. Small files can arrive
   whole.
-- **Point at the code** with `explain --file <path> --lines a-b`: the player
-  shows that file with those lines lit. Line numbers are the file **as it
-  stands at that moment of the course** — after a partial `take`, they are
-  the partial file's numbers. Check with `replay course outline` and with
-  what you took.
+- **Point at the code** with `explain --file <path> --lines a-b` (or
+  `--lines 25` for one line): the player shows that file with those lines
+  lit. **Line numbers are always the real file's** — the numbers `outline`
+  prints and `take` uses. The tool finds those lines in the file as built so
+  far and says so when their numbers there differ ("Lines 36-68 of diff.ts
+  are lines 31-63 of the file so far"); the player shows the latter. So in
+  the prose, refer to code **by name** ("`myers`", "the loop over `k`"),
+  not by line number.
+- `outline` gives each definition's range and where the comment above it
+  starts: take `function myers (36-68, comment from 31)` as `--lines 31-68`.
 - **A simpler first draft** is allowed when it teaches something:
   `replay course write <path> < draft` (a real file of the target, written by
   hand), then explain the limitation, then `take` the real version and
   explain the difference. Say plainly that the draft was a draft.
-- **Examples** are teaching material, not part of the repository:
-  `replay course example learn/01-vectors.ts < code`. Make them small and
-  runnable against the real API; run them yourself if you can. Exercises,
-  worked problems and cheat sheets go here too (`learn/…`).
+- **Examples** are teaching material, not part of the repository. Write
+  them small and runnable against the real API, and **run them** before
+  recording them:
+
+  ```bash
+  mkdir -p learn && cat > learn/01-vectors.ts <<'TS'
+  import { dot } from "../src/vec.ts";
+  console.log(dot({ x: 1, y: 0 }, { x: 0, y: 1 })); // 0
+  TS
+  node learn/01-vectors.ts                 # Node 22.18+ runs TypeScript as is
+  replay course example learn/01-vectors.ts   # records the file as it is on disk
+  rm -r learn                              # the course keeps it; the repo does not need it
+  ```
+
+  Paths are relative to `learn/`. Quote the real output in an explanation.
+  Exercises, worked problems and cheat sheets go under `learn/` too.
+
 - **Boilerplate**: one explanation of what it is, then
   `replay course fill "*.json" config/ .github/`.
 - **End each lesson** with a short recap: the two or three ideas to keep, a
@@ -107,7 +130,23 @@ replay course take src/vec.ts                      # the rest of the file
 - Read the one-line progress after each command; `replay course status`
   lists what is partial and what is next.
 
-## 3. How to explain
+## 3. Fix mistakes as you go
+
+```bash
+replay course show --last 10            # the latest steps, numbered
+replay course show 23                   # one step in full, with the code it lights
+replay course amend 23 - <<'MD'         # rewrite an explanation in place
+…
+MD
+replay course amend 4 --title "…" --goal "…"   # a lesson's title or goal
+replay course undo 2                    # take back the last two steps
+```
+
+`amend` keeps everything after the step; `undo` throws its steps away (look
+at them with `show` first). `take` refuses to narrow a file the learner has
+already seen more of — widen `--lines`, or pass `--drop` if you mean it.
+
+## 4. How to explain
 
 Write for a capable engineer who has never seen this code.
 
@@ -121,24 +160,29 @@ Write for a capable engineer who has never seen this code.
 - **Markdown works**: headings, lists, tables, fenced code with a language,
   quotes. Keep explanations to a few paragraphs; split a long one into
   several steps beside the code each part is about.
-- **Never invent.** If you are not sure why something is the way it is, say
-  so, or look it up in the history (`git log -L`, `git blame`) before
-  explaining it. Never describe behaviour the code does not have.
+- **Maths** renders with KaTeX; `explain` warns when a `$` is unbalanced.
+- **Never invent.** Check claims about behaviour, edge cases or performance
+  by running them — a scratch copy, a one-off script, the test suite —
+  before you write them down. If you are not sure why something is the way
+  it is, say so, or look in the history (`git log -L`, `git blame`). Never
+  describe behaviour the code does not have.
 
-## 4. Finish, check, share
+## 5. Finish, check, share
 
 ```bash
 replay course check        # exit 0 only when every file matches the target exactly
 ```
 
-Fix whatever it lists: `take` or `fill` what is missing; `replay course
-undo` takes back mistakes (`undo 3` for the last three). A file it reports
-as "not in the target" must be undone, or made an `example`. Then:
+Fix whatever it lists: `take` or `fill` what is missing. A file it reports as
+"not in the target" must be undone, or made an `example`. Then:
 
 ```bash
-git add .replays && git commit -m "Course: <title>"
-replay export .replays/<file>.json          # one HTML file to hand to someone
+replay export .replays/<file>.json -o ~/Desktop/learn-<project>.html   # one file to hand over
 ```
+
+The course is `.replays/<file>.json`. Offer to commit it (`git add
+.replays/<file>.json`) — commit it yourself only if the person or the
+project's rules want commits from you. Never commit the exported HTML.
 
 Tell the person how to open it: `replay` (the player, Saved tab), or the
 exported file. To keep learning past the target, `replay history --from

@@ -318,6 +318,7 @@ export function take(
   path: string,
   ranges?: [number, number][],
   why?: string,
+  options: { drop?: boolean } = {},
 ): Course {
   const content = target.files.get(path);
   if (content === undefined) {
@@ -327,8 +328,55 @@ export function take(
         : `${path} is not in the course's target — see \`replay course status\`.`,
     );
   }
+  const total = splitLines(content).length;
+  const past = ranges?.find(([, end]) => end > total);
+  if (past) {
+    throw new Error(
+      `${path} has ${total} lines; --lines ${past[0]}-${past[1]} goes past its end.`,
+    );
+  }
   const after = ranges ? sliceLines(content, ranges) : content;
+  // Taking a narrower range than before would take code away from the
+  // learner, which is almost never what the author meant.
+  const before = current(course, path);
+  if (before !== null && !options.drop) {
+    const kept = (text: string) => builtLines(text, content);
+    const lost = [...kept(before)].filter((line) => !kept(after).has(line));
+    if (lost.length) {
+      throw new Error(
+        `this would remove ${lost.length} line${lost.length === 1 ? "" : "s"} the learner has already seen (${rangesText(lost)}); widen --lines to keep them, or pass --drop to remove them on purpose.`,
+      );
+    }
+  }
   return change(course, path, after, { why });
+}
+
+/** Which lines of `target` (by number) `built` already holds, in order. */
+function builtLines(built: string, target: string): Set<number> {
+  const have = new Set<number>();
+  let t = 0;
+  for (const op of diffLines(built, target)) {
+    if (op === "=") have.add(++t);
+    else if (op === "+") t++;
+  }
+  return have;
+}
+
+/** `[1,2,3,7]` → `"1–3, 7"`. */
+export function rangesText(lines: readonly number[]): string {
+  const parts: string[] = [];
+  let start = lines[0];
+  let last = lines[0];
+  for (const line of [...lines.slice(1), Infinity]) {
+    if (line === last! + 1) {
+      last = line;
+      continue;
+    }
+    parts.push(start === last ? `${start}` : `${start}–${last}`);
+    start = line;
+    last = line;
+  }
+  return parts.join(", ");
 }
 
 /** A version of a real file written by hand — a simpler first draft, say. */
@@ -407,6 +455,58 @@ export function fill(
     filled.push(path);
   }
   return { course: next, filled };
+}
+
+/** A step in a few words, for `show` and `undo`: what the author typed, not the format. */
+export function describe(step: Step, index: number): string {
+  const n = `#${index + 1}`.padStart(5);
+  const first = (text: string) => {
+    const line = text.trim().split("\n")[0] ?? "";
+    return line.length > 70 ? `${line.slice(0, 69)}…` : line;
+  };
+  switch (step.kind) {
+    case "lesson":
+      return `${n}  lesson   "${step.title}"`;
+    case "explain":
+      return `${n}  explain  ${step.path ? `${step.path}${step.lines ? `:${step.lines[0]}-${step.lines[1]}` : ""}  ` : ""}"${first(step.text)}"`;
+    case "write":
+    case "edit":
+      return `${n}  ${step.aside ? "example" : "code   "}  ${step.path}${step.why ? `  — ${first(step.why)}` : ""}`;
+    case "delete":
+      return `${n}  delete   ${step.path}`;
+    default:
+      return `${n}  ${step.kind}`;
+  }
+}
+
+/**
+ * Rewrite an explanation, a lesson's title or goal, or a step's `why` —
+ * in place, keeping everything after it. Code steps change only by `undo`.
+ */
+export function amend(
+  course: Course,
+  number: number,
+  change: { text?: string; title?: string; goal?: string; why?: string },
+): Course {
+  const step = course.replay.steps[number - 1];
+  if (!step)
+    throw new Error(
+      `There is no step #${number} (the course has ${course.replay.steps.length}).`,
+    );
+  if (change.text !== undefined) {
+    if (step.kind !== "explain")
+      throw new Error(`#${number} is a ${step.kind}, not an explanation.`);
+    if (!change.text.trim()) throw new Error("An explanation needs some text.");
+    step.text = change.text.trim();
+  }
+  if (change.title !== undefined || change.goal !== undefined) {
+    if (step.kind !== "lesson")
+      throw new Error(`#${number} is a ${step.kind}, not a lesson.`);
+    if (change.title !== undefined) step.title = change.title;
+    if (change.goal !== undefined) step.goal = change.goal;
+  }
+  if (change.why !== undefined) step.why = change.why;
+  return save(course);
 }
 
 /** Take back the last step (or the last `count`). */

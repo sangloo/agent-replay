@@ -10,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   addExplain,
   addLesson,
+  amend,
+  describe as describeStep,
   courseTarget,
   example,
   fill,
@@ -129,6 +131,29 @@ describe("a course", () => {
     expect(again.replay.steps).toHaveLength(course.replay.steps.length);
     const { removed } = undo(again, 2);
     expect(removed.map((step) => step.kind)).toEqual(["write", "write"]);
+  });
+});
+
+describe("correcting a course", () => {
+  it("refuses to shrink a file silently, bounds line ranges, and amends in place", () => {
+    let course = startCourse(repo, { title: "Fixes" });
+    const target = courseTarget(course);
+    course = take(course, target, "src/vec.ts", [[1, 8]]);
+    expect(() => take(course, target, "src/vec.ts", [[1, 4]])).toThrow(
+      /remove 4 lines the learner has already seen \(5–8\)/,
+    );
+    expect(() => take(course, target, "src/vec.ts", [[1, 99]])).toThrow(/past its end/);
+    course = take(course, target, "src/vec.ts", [[1, 4]], undefined, { drop: true });
+    course = addLesson(course, "One");
+    course = addExplain(course, target, "Frist draft.");
+    course = amend(course, 4, { text: "First draft." });
+    course = amend(course, 3, { goal: "Know it." });
+    expect(course.replay.steps[2]).toMatchObject({ title: "One", goal: "Know it." });
+    expect(describeStep(course.replay.steps[3]!, 3)).toBe(
+      '   #4  explain  "First draft."',
+    );
+    expect(() => amend(course, 3, { text: "x" })).toThrow(/not an explanation/);
+    expect(() => amend(course, 9, { text: "x" })).toThrow(/no step #9/);
   });
 });
 

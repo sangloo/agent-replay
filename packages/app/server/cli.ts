@@ -8,7 +8,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,8 @@ import { DEFAULT_MODEL, explain } from "./explain.ts";
 import {
   addExplain,
   addLesson,
+  amend,
+  describe,
   courseTarget,
   example,
   fill,
@@ -81,7 +83,7 @@ Works with Claude Code, Codex and Gemini CLI sessions, in any git repository.
   replay export [<replay.json>] [options]     one HTML file that plays the replay
                                               anywhere, offline — attach it to a PR
     --session <id|log file>                   a session instead of a saved replay
-    -o, --out <file.html>                     default: beside the replay, or here
+    -o, --out <file.html>                     default: <title>.html here
   replay check [<replay.json>] [--session]    what the agent checked, and whether it
                                               held — exits 1 when something needs a look
   replay course <command>                     teach a repository: rebuild it from nothing,
@@ -107,19 +109,26 @@ prints where it stands; open it in the player at any moment to see it play.
   explain [--file <path>] [--lines a-b] ["<markdown>" | -]
                               teaching text (Markdown, $math$), about code when --file;
                               --lines are the real file's (as outline and take count)
-  take <path> [--lines 1-20,45-80] [--why "<text>"]
+  take <path> [--lines 1-20,45-80] [--why "<text>"] [--drop]
                               the next piece of a real file: those lines of it at the
-                              target — or all of it — exactly as they are there
+                              target — or all of it — exactly as they are there; it
+                              refuses to take away lines already built unless --drop
   write <path> [--why "<text>"] < content
                               a hand-written version of a real file (a simpler draft)
-  example <path> [--why "<text>"] < content
-                              teaching material that is not part of the repository
+  example <path> [--why "<text>"] [< content]
+                              teaching material that is not part of the repository —
+                              from stdin, or the file at <path> in the working tree
   fill [<path or glob>…] [--why "<text>"]
                               bring every remaining matching file to the target
+  show [<n>] [--last <n>]     the steps so far, numbered — or step <n> in full, with
+                              the code an explanation lights
+  amend <n> ["<markdown>" | -] [--title] [--goal] [--why]
+                              rewrite step <n>'s explanation, lesson title or goal, or why
   undo [<n>]                  take back the last step (or the last n)
   check                       exit 0 only when every file matches the target
 
-All of them take --course <name> to pick a course other than the newest.`;
+Line numbers (--lines) are always the real file's, as outline shows them.
+All commands take --course <name> to pick a course other than the newest.`;
 
 const here = process.env.INIT_CWD ?? process.cwd();
 
@@ -167,7 +176,24 @@ function courseLine(course: Course): string {
   const target = courseTarget(course);
   const p = progressOf(course, target);
   const percent = p.totalLines ? Math.round((p.lines / p.totalLines) * 100) : 100;
-  return `${p.lessons} lesson${p.lessons === 1 ? "" : "s"} · ${p.steps} steps · ${p.complete}/${p.files.length} files complete${p.partial ? `, ${p.partial} partial` : ""} · ${percent}% of lines`;
+  const title =
+    course.replay.title.length > 40
+      ? `${course.replay.title.slice(0, 39)}…`
+      : course.replay.title;
+  const hint =
+    p.lessons === 0 && p.steps > 1
+      ? ' — no lesson yet: `replay course lesson "<title>"` opens one'
+      : "";
+  return `"${title}" · ${p.lessons} lesson${p.lessons === 1 ? "" : "s"} · ${p.steps} steps · ${p.complete}/${p.files.length} files complete${p.partial ? `, ${p.partial} partial` : ""} · ${percent}% of lines${hint}`;
+}
+
+/** Odd `$` outside code: a formula that will not render. */
+function unbalancedMath(text: string): boolean {
+  const prose = text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`\n]*`/g, "")
+    .replace(/\\\$/g, "");
+  return (prose.replace(/\$\$/g, "").match(/\$/g) ?? []).length % 2 === 1;
 }
 
 function readStdin(): string {
@@ -199,6 +225,8 @@ function runCourse(args: string[]): void {
       lines: { type: "string" },
       why: { type: "string" },
       all: { type: "boolean" },
+      drop: { type: "boolean" },
+      last: { type: "string" },
     },
   });
   const root = git.repoRoot(values.repo ? resolve(here, values.repo) : here);
@@ -210,6 +238,12 @@ function runCourse(args: string[]): void {
   if (sub === "start") {
     if (!values.title)
       fail('usage: replay course start --title "<course>" [--to <rev>] [--path <dir>]');
+    let earlier: Course | undefined;
+    try {
+      earlier = loadCourse(root);
+    } catch {
+      // The first course here.
+    }
     const course = startCourse(root, {
       title: values.title,
       rev: values.to,
@@ -227,6 +261,11 @@ function runCourse(args: string[]): void {
           .map(([path, content]) => `    ${path}  (${lineCount(content)})`),
         ...(order.length > 60
           ? [`    … and ${order.length - 60} more — \`replay course status --all\``]
+          : []),
+        ...(earlier
+          ? [
+              `  From now on \`replay course …\` works on this course; add --course ${earlier.name} for "${earlier.replay.title}".`,
+            ]
           : []),
       ].join("\n"),
     );
@@ -281,11 +320,12 @@ function runCourse(args: string[]): void {
       print(
         [
           `${repoPath(path)} — ${numbered.length} lines at ${target.rev.slice(0, 7)}`,
-          ...(symbols.length
+          ...(symbols.length && !ranges
             ? [
-                "  Definitions:",
+                "  Definitions (lines, and where the comment above starts):",
                 ...symbols.map(
-                  (s) => `    ${String(s.line).padStart(5)}  ${s.kind} ${s.name}`,
+                  (s) =>
+                    `    ${`${s.line}-${s.end}`.padStart(9)}  ${s.kind} ${s.name}${s.doc ? `  (comment from ${s.doc})` : ""}`,
                 ),
               ]
             : []),
@@ -317,20 +357,42 @@ function runCourse(args: string[]): void {
           }
         : undefined;
       course = addExplain(course, target, text, about);
+      const added = course.replay.steps.at(-1);
+      if (
+        about?.lines &&
+        added?.kind === "explain" &&
+        added.lines &&
+        added.lines.join("-") !== about.lines.join("-")
+      ) {
+        print(
+          `  Lines ${about.lines.join("-")} of ${about.path} are lines ${added.lines.join("-")} of the file so far; the player shows those numbers.`,
+        );
+      }
+      if (unbalancedMath(text))
+        print(
+          "  ! An odd number of $ — a formula may not render. `replay course amend` fixes it.",
+        );
       break;
     }
     case "take": {
       const [path] = positionals;
       if (!path)
         fail("usage: replay course take <path> [--lines 1-20,45-80] [--why <text>]");
-      course = take(course, target, repoPath(path), ranges, values.why);
+      course = take(course, target, repoPath(path), ranges, values.why, {
+        drop: values.drop,
+      });
       break;
     }
     case "write":
     case "example": {
       const [path] = positionals;
       if (!path) fail(`usage: replay course ${sub} <path> [--why <text>] < content`);
-      const content = readStdin();
+      // An example is often written and run first; then it is read from disk.
+      const onDisk = resolve(root, repoPath(path));
+      const content =
+        sub === "example" && process.stdin.isTTY && existsSync(onDisk)
+          ? readFileSync(onDisk, "utf8")
+          : readStdin();
       course =
         sub === "write"
           ? write(course, target, repoPath(path), content, values.why)
@@ -347,11 +409,83 @@ function runCourse(args: string[]): void {
     }
     case "undo": {
       const count = positionals[0] ? positiveInteger(positionals[0], "undo") : 1;
+      const from =
+        course.replay.steps.length - Math.min(count, course.replay.steps.length);
       const result = undo(course, count);
       course = result.course;
       print(
-        `Took back ${result.removed.map((step) => step.kind).join(", ") || "nothing"}.`,
+        result.removed.length
+          ? [
+              "Took back:",
+              ...result.removed.map((step, i) => describe(step, from + i)),
+            ].join("\n")
+          : "Nothing to take back.",
       );
+      break;
+    }
+    case "show": {
+      const steps = course.replay.steps;
+      const [which] = positionals;
+      if (which) {
+        const number = positiveInteger(which, "show");
+        const step = steps[number - 1];
+        if (!step) fail(`there is no step #${number} (the course has ${steps.length})`);
+        const lines = [describe(step, number - 1)];
+        if (step.kind === "explain") {
+          lines.push("", step.text);
+          if (step.path && step.lines) {
+            const playback = play(course.replay);
+            const text = (playback.contentAt(step.path, number) ?? "").split("\n");
+            lines.push(
+              "",
+              `  Lights ${step.path} ${step.lines.join("-")} (the file as it is at this step):`,
+            );
+            for (let line = step.lines[0]; line <= step.lines[1]; line++)
+              lines.push(`${String(line).padStart(7)}  ${text[line - 1] ?? ""}`);
+          }
+        } else if (step.kind === "lesson" && step.goal)
+          lines.push(`  goal: ${step.goal}`);
+        else if (step.why) lines.push(`  why: ${step.why}`);
+        print(lines.join("\n"));
+        return;
+      }
+      const last = values.last ? positiveInteger(values.last, "--last") : steps.length;
+      const from = Math.max(0, steps.length - last);
+      print(
+        [
+          `"${course.replay.title}" (${course.name})`,
+          ...steps.slice(from).map((step, i) => describe(step, from + i)),
+          "  `replay course show <n>` for one step in full; `replay course amend <n>` to rewrite it.",
+        ].join("\n"),
+      );
+      return;
+    }
+    case "amend": {
+      const [which, ...words] = positionals;
+      if (!which)
+        fail(
+          'usage: replay course amend <n> ["<markdown>" | -] [--title] [--goal] [--why]',
+        );
+      const number = positiveInteger(which, "amend");
+      const onlyFields =
+        values.title !== undefined ||
+        values.goal !== undefined ||
+        values.why !== undefined;
+      const text =
+        words.length === 0
+          ? onlyFields
+            ? undefined
+            : readStdin()
+          : words[0] === "-"
+            ? readStdin()
+            : words.join(" ");
+      course = amend(course, number, {
+        text,
+        title: values.title,
+        goal: values.goal,
+        why: values.why,
+      });
+      print(describe(course.replay.steps[number - 1]!, number - 1));
       break;
     }
     case "check": {
@@ -610,11 +744,8 @@ switch (command) {
     });
     const [path] = positionals;
     let replay: Replay;
-    let near = here;
     if (path) {
-      const loaded = load(path);
-      replay = loaded.replay;
-      near = dirname(loaded.file);
+      replay = load(path).replay;
     } else {
       const root = values.repo ? resolve(here, values.repo) : git.repoRoot(here);
       replay = captureSession({
@@ -630,7 +761,9 @@ switch (command) {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "")
         .slice(0, 60) || "replay";
-    const out = resolve(here, values.out ?? resolve(near, `${slug}.html`));
+    // Beside you, not in .replays/: an export is a copy to hand out, not
+    // something to commit with the replay.
+    const out = resolve(here, values.out ?? `${slug}.html`);
     writeFileSync(out, exportHtml(replay, dist));
     print(`Exported "${replay.title}" → ${relative(here, out) || out}`);
     break;

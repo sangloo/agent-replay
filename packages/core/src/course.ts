@@ -56,6 +56,51 @@ export interface CodeSymbol {
   kind: string;
   /** 1-based. */
   line: number;
+  /** The definition's last line, as near as braces or indentation tell. */
+  end: number;
+  /** Where the comment or decorators just above it begin, when there are any. */
+  doc?: number;
+}
+
+const STRINGS = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g;
+
+/** The last line (0-based) of the definition starting at `start`. */
+function blockEnd(lines: readonly string[], start: number): number {
+  const head = lines[start]!;
+  // Python: the body is whatever is indented deeper than the `def`.
+  if (/^\s*(?:async\s+)?(?:def|class)\s/.test(head) && head.trimEnd().endsWith(":")) {
+    const indent = head.search(/\S/);
+    let end = start;
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (!line.trim()) continue;
+      if (line.search(/\S/) <= indent) break;
+      end = i;
+    }
+    return end;
+  }
+  // Braces: until they close; a braceless one-liner ends at its `;`.
+  let depth = 0;
+  let opened = false;
+  for (let i = start; i < lines.length; i++) {
+    const code = lines[i]!.replace(STRINGS, '""').replace(/\/\/.*$/, "");
+    for (const char of code) {
+      if (char === "{") {
+        depth++;
+        opened = true;
+      } else if (char === "}") depth--;
+    }
+    if (opened && depth <= 0) return i;
+    if (!opened && depth === 0 && /;\s*$/.test(code)) return i;
+  }
+  return lines.length - 1;
+}
+
+/** The first line (0-based) of the comment or decorators right above `start`. */
+function docStart(lines: readonly string[], start: number): number | undefined {
+  let at = start;
+  while (at > 0 && /^\s*(\/\*\*?|\*|\/\/|#(?!!)|@\w)/.test(lines[at - 1]!)) at--;
+  return at < start ? at : undefined;
 }
 
 const DEFINITIONS: readonly [string, RegExp][] = [
@@ -86,11 +131,19 @@ const DEFINITIONS: readonly [string, RegExp][] = [
 /** Where each definition starts: enough to choose line ranges by. */
 export function outline(content: string): CodeSymbol[] {
   const symbols: CodeSymbol[] = [];
-  splitLines(content).forEach((text, index) => {
+  const lines = splitLines(content).map((line) => line.replace(/\n$/, ""));
+  lines.forEach((text, index) => {
     for (const [kind, pattern] of DEFINITIONS) {
       const match = pattern.exec(text);
       if (match) {
-        symbols.push({ name: match[1]!, kind, line: index + 1 });
+        const doc = docStart(lines, index);
+        symbols.push({
+          name: match[1]!,
+          kind,
+          line: index + 1,
+          end: blockEnd(lines, index) + 1,
+          ...(doc === undefined ? {} : { doc: doc + 1 }),
+        });
         break;
       }
     }

@@ -50,12 +50,36 @@ describe("outline", () => {
   it("finds definitions across languages", () => {
     const ts =
       "import x from 'y';\nexport function add(a, b) {}\nexport const mul = (a, b) => a * b;\nclass Box {}\ninterface P {}\n";
-    expect(outline(ts).map((s) => `${s.kind} ${s.name} ${s.line}`)).toEqual([
-      "function add 2",
-      "const mul 3",
-      "class Box 4",
-      "interface P 5",
+    expect(outline(ts).map((s) => `${s.kind} ${s.name} ${s.line}-${s.end}`)).toEqual([
+      "function add 2-2",
+      "const mul 3-3",
+      "class Box 4-4",
+      "interface P 5-5",
     ]);
+    const long = [
+      "/**",
+      " * Sum, with a { in the comment.",
+      " */",
+      "export function sum(xs: number[]): number {",
+      '  const open = "{";',
+      "  let total = 0;",
+      "  for (const x of xs) {",
+      "    total += x;",
+      "  }",
+      "  return total;",
+      "}",
+      "",
+      "export const twice = (x: number) =>",
+      "  x * 2;",
+    ].join("\n");
+    expect(outline(long)).toEqual([
+      { name: "sum", kind: "function", line: 4, end: 11, doc: 1 },
+      { name: "twice", kind: "const", line: 13, end: 14 },
+    ]);
+    expect(outline("def area(r):\n    return r * r\n\nx = 1\n")[0]).toMatchObject({
+      line: 1,
+      end: 2,
+    });
     expect(outline("def area(r):\n  pass\n").map((s) => s.name)).toEqual(["area"]);
     expect(outline("func (p *Point) Norm() float64 {\n}\n").map((s) => s.name)).toEqual(
       ["Norm"],
