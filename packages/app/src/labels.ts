@@ -33,7 +33,7 @@ export function stepLabel(frame: Frame): string {
     case "commit":
       return firstLine(step.subject, 60);
     case "external":
-      return `${step.content === null ? "Delete" : change?.before === null ? "Create" : "Change"} ${fileName(step.path)} · outside the tools`;
+      return `${step.content === null ? "Delete" : change?.before === null ? "Create" : "Change"} ${fileName(step.path)}`;
   }
 }
 
@@ -54,7 +54,7 @@ export function kindName(step: Step): string {
     case "commit":
       return "Commit";
     case "external":
-      return "Outside change";
+      return "Change by a command";
   }
 }
 

@@ -314,6 +314,11 @@ export function Library({
       </div>
 
       <main className="mx-auto flex max-w-4xl flex-col gap-6 px-3 pb-24">
+        <p className="-mt-2 px-3 text-xs text-text-low">
+          {tab === "sessions"
+            ? "Agent sessions on this machine — Claude Code, Codex and Gemini CLI. Each is read live when you open it."
+            : "Replays saved into a repository’s .replays/ folder — with their notes, ready to share."}
+        </p>
         <div
           className={cn(
             "px-3 transition-opacity duration-fast",

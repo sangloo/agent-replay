@@ -1,5 +1,8 @@
 import type { Replay } from "@agent-replay/core";
+import { LoaderCircle } from "lucide-react";
 import * as React from "react";
+
+import { Button } from "@/ui";
 
 import { api, useLoad } from "./api";
 import { Library } from "./library";
@@ -58,11 +61,63 @@ function Status({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * Waiting, said plainly: what is happening, for how long so far, and — once
+ * it has been a while — why, so a long first capture never looks stuck.
+ */
+function Loading({ what }: { what: string }) {
+  const [seconds, setSeconds] = React.useState(0);
+  React.useEffect(() => {
+    const timer = setInterval(() => setSeconds((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <Status>
+      <div className="flex max-w-md flex-col items-center gap-2 text-center">
+        <span className="flex items-center gap-2 text-text-high">
+          <LoaderCircle aria-hidden className="size-4 animate-spin text-text-low" />
+          {what}
+        </span>
+        {seconds >= 3 ? (
+          <span className="text-xs text-text-low tabular-nums">
+            {seconds} s
+            {seconds >= 8
+              ? " — a long session is read in full the first time; opening it again is instant."
+              : ""}
+          </span>
+        ) : null}
+      </div>
+    </Status>
+  );
+}
+
+function Failed({ message }: { message: string }) {
+  return (
+    <Status>
+      <div className="flex max-w-md flex-col items-center gap-3 text-center">
+        <p className="text-text-high">{message}</p>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => window.location.reload()}
+          >
+            Try again
+          </Button>
+          <Button variant="ghost" size="sm" onClick={back}>
+            All replays
+          </Button>
+        </div>
+      </div>
+    </Status>
+  );
+}
+
 function SavedReplay({ id, at }: { id: string; at?: number }) {
   const loaded = useLoad(id, api.replay);
   const source = React.useMemo(() => ({ kind: "replays" as const, id }), [id]);
-  if (loaded.state === "loading") return <Status>Loading the replay…</Status>;
-  if (loaded.state === "failed") return <Status>{loaded.message}</Status>;
+  if (loaded.state === "loading") return <Loading what="Opening the replay…" />;
+  if (loaded.state === "failed") return <Failed message={loaded.message} />;
   return <Player replay={loaded.data} source={source} at={at} onBack={back} />;
 }
 
@@ -72,8 +127,8 @@ function LiveSession({ id, at }: { id: string; at?: number }) {
   const [saving, setSaving] = React.useState(false);
   const [outcome, setOutcome] = React.useState<string>();
   if (loaded.state === "loading")
-    return <Status>Reading the session and the repository…</Status>;
-  if (loaded.state === "failed") return <Status>{loaded.message}</Status>;
+    return <Loading what="Reading the session and the repository…" />;
+  if (loaded.state === "failed") return <Failed message={loaded.message} />;
   const { replay, repo, warnings, saved } = loaded.data;
   const save = async () => {
     setSaving(true);

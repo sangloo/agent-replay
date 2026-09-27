@@ -104,22 +104,28 @@ export const Caption = React.memo(function Caption({
         ? replay.steps.findIndex((candidate) => candidate.id === step.cause)
         : -1;
       const by = cause >= 0 ? replay.steps[cause] : undefined;
+      title = (
+        <>
+          {stepLabel(frame)}
+          <span className="font-normal text-text-low"> · by a shell command</span>
+        </>
+      );
       body = (
         <Text className="text-text-mid">
-          Changed outside the agent&rsquo;s edit tools
           {by?.kind === "command" ? (
             <>
-              {", probably by "}
+              {"Most likely "}
               <button
                 type="button"
                 onClick={() => onJump(cause + 1)}
                 className="rounded-control font-mono text-text-high underline decoration-line-high underline-offset-2 focus-bar hover:decoration-text-mid"
               >
-                $ {firstLine(by.command, 60)}
+                $ {firstLine(by.command, 70)}
               </button>
+              {" — an edit no tool call recorded, shown where it happened."}
             </>
           ) : (
-            "."
+            "An edit no tool call recorded — a formatter, a script or a person — shown where it was first seen."
           )}
         </Text>
       );
@@ -155,9 +161,7 @@ export const Caption = React.memo(function Caption({
             "size-3.5 shrink-0",
             step.kind === "command" && step.failed
               ? "text-danger-ink"
-              : step.kind === "external"
-                ? "text-warning-ink"
-                : "text-text-mid",
+              : "text-text-mid",
           )}
         />
         <span className="font-medium text-text-high">{title}</span>

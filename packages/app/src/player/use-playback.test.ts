@@ -95,4 +95,33 @@ describe("the playback clock", () => {
     expect(after - before).toBeGreaterThan(3 * before * 0.8);
     expect(stepSeconds(frames[0])).toBeGreaterThan(1.5);
   });
+  it("moves straight past a step with nothing to type, rather than waiting it out", () => {
+    const talky: Replay = {
+      ...replay,
+      steps: [
+        {
+          kind: "prompt",
+          id: "p1",
+          at: "2026-01-01T00:00:01Z",
+          agent: "main",
+          turn: 0,
+          text: "Rename the second line.",
+        },
+        ...replay.steps,
+      ],
+    };
+    const { frames } = play(talky);
+    let last: Snapshot | undefined;
+    const clock = new Engine(frames, (snapshot) => (last = snapshot));
+    clock.setVisible(frames.map((frame) => frame.index));
+    clock.forward();
+    expect(last).toMatchObject({ cursor: 1, mode: "stepping" });
+    // Still reading the prompt: → goes on to the edit and plays it.
+    clock.forward();
+    expect(last).toMatchObject({ cursor: 2, progress: 0, mode: "stepping" });
+    // Mid-typing, → finishes the edit instead.
+    vi.advanceTimersByTime(100);
+    clock.forward();
+    expect(last).toMatchObject({ cursor: 2, progress: 1, mode: "paused" });
+  });
 });

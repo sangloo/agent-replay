@@ -4,7 +4,7 @@ import {
   FileMinus,
   FilePen,
   FilePlus,
-  FileWarning,
+  FileTerminal,
   GitCommitHorizontal,
   MessageSquare,
   Terminal,
@@ -51,7 +51,7 @@ export function StepIcon({ frame, className }: { frame: Frame; className: string
     case "delete":
       return <FileMinus aria-hidden className={className} />;
     case "external":
-      return <FileWarning aria-hidden className={className} />;
+      return <FileTerminal aria-hidden className={className} />;
     case "command":
       return <Terminal aria-hidden className={className} />;
     case "commit":
@@ -63,7 +63,7 @@ export function StepIcon({ frame, className }: { frame: Frame; className: string
 
 /** A row's words: the step's label, without what its icon already says. */
 function rowLabel(frame: Frame): string {
-  return stepLabel(frame).replace(/ · outside the tools$/, "");
+  return stepLabel(frame);
 }
 
 type Place = "done" | "current" | "ahead";
@@ -103,18 +103,16 @@ const Row = React.memo(function Row({
             "icon-sm shrink-0",
             place === "ahead"
               ? "text-text-low"
-              : step.kind === "external"
-                ? "text-warning-ink"
-                : failed
-                  ? "text-danger-ink"
-                  : "text-text-mid",
+              : failed
+                ? "text-danger-ink"
+                : "text-text-mid",
           )}
         />
         <span
           className="min-w-0 flex-1 truncate"
           title={
             step.kind === "external"
-              ? "Changed outside the agent's edit tools"
+              ? "Made by a shell command, not an edit tool"
               : undefined
           }
         >
@@ -235,8 +233,8 @@ function Body({ step }: { step: Step }) {
       return (
         <p className="text-text-mid">
           {step.reason === "drift"
-            ? "Changed outside the agent's edit tools, found by the next tool that read the file."
-            : "Changed outside the agent's edit tools, found by comparing with the end state."}
+            ? "Made by a shell command rather than an edit tool — seen when the next tool read the file."
+            : "Made by a shell command rather than an edit tool — found by comparing with the end state."}
         </p>
       );
     case "commit":
