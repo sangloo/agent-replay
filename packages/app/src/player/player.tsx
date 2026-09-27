@@ -149,6 +149,8 @@ export interface PlayerProps {
   saving?: boolean;
   /** Back to the list; absent in a replay exported as a file. */
   onBack?: () => void;
+  /** Something to say above the panels: a newer version of a course, say. */
+  notice?: React.ReactNode;
 }
 
 export function Player({
@@ -161,6 +163,7 @@ export function Player({
   saved,
   saving,
   onBack,
+  notice,
 }: PlayerProps) {
   const playback = React.useMemo(() => play(replay), [replay]);
   // A course teaches: its lessons lead, and there is nothing to audit.
@@ -656,6 +659,11 @@ export function Player({
       {warnings.length ? (
         <p className="border-b border-line px-4 py-1.5 text-xs text-warning-ink">
           {warnings.join(" ")}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="border-b border-line bg-emphasis-subtle px-4 py-1.5 text-xs text-text-mid">
+          {notice}
         </p>
       ) : null}
 

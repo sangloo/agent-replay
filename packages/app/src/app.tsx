@@ -113,12 +113,70 @@ function Failed({ message }: { message: string }) {
   );
 }
 
+/** The step the address says the player is on — to keep the place on a reload. */
+function cursorInHash(): number | undefined {
+  const value = Number(
+    new URLSearchParams(window.location.hash.split("?")[1]).get("at"),
+  );
+  return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * A course being written changes while it is watched: its newer version is
+ * fetched quietly, and offered rather than swapped in under the reader.
+ */
+function useNewerCourse(id: string, shown: Replay | undefined): Replay | undefined {
+  const [newer, setNewer] = React.useState<Replay>();
+  const endedAt = shown?.endedAt;
+  const isCourse = shown?.source === "course";
+  React.useEffect(() => {
+    if (!isCourse) return;
+    let alive = true;
+    const timer = setInterval(async () => {
+      const result = await api.replay(id);
+      if (alive && result.ok && result.data.endedAt !== endedAt) setNewer(result.data);
+    }, 4000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [id, isCourse, endedAt]);
+  return newer && newer.endedAt !== endedAt ? newer : undefined;
+}
+
 function SavedReplay({ id, at }: { id: string; at?: number }) {
   const loaded = useLoad(id, api.replay);
   const source = React.useMemo(() => ({ kind: "replays" as const, id }), [id]);
+  const [replay, setReplay] = React.useState<{ data: Replay; at?: number }>();
+  const shown = replay?.data ?? (loaded.state === "ready" ? loaded.data : undefined);
+  const newer = useNewerCourse(id, shown);
   if (loaded.state === "loading") return <Loading what="Opening the replay…" />;
   if (loaded.state === "failed") return <Failed message={loaded.message} />;
-  return <Player replay={loaded.data} source={source} at={at} onBack={back} />;
+  const added = newer ? newer.steps.length - shown!.steps.length : 0;
+  return (
+    <Player
+      key={shown!.endedAt}
+      replay={shown!}
+      source={source}
+      at={replay ? replay.at : at}
+      onBack={back}
+      notice={
+        newer ? (
+          <>
+            The course has moved on
+            {added > 0 ? ` — ${added} new step${added === 1 ? "" : "s"}` : ""}.{" "}
+            <button
+              type="button"
+              onClick={() => setReplay({ data: newer, at: cursorInHash() })}
+              className="rounded-control font-medium text-text-high underline decoration-line-high underline-offset-2 focus-bar hover:decoration-text-mid"
+            >
+              Show them
+            </button>
+          </>
+        ) : undefined
+      }
+    />
+  );
 }
 
 function LiveSession({ id, at }: { id: string; at?: number }) {
