@@ -47,6 +47,7 @@ import { CodeView, type Blame, type Origin } from "./code-view";
 import type { Diffable } from "./compose";
 import { EvidencePanel } from "./evidence";
 import { FilesPanel } from "./files";
+import { LessonPanel } from "./lesson";
 import { StepList } from "./steps";
 import { SPEEDS, usePlayback, type Speed } from "./use-playback";
 import { useRepo } from "./use-repo";
@@ -83,8 +84,8 @@ const VIEWS = [
 ] as const;
 const isView = oneOf<View>("change", "base", "file");
 
-type Side = "steps" | "evidence";
-const isSide = oneOf<Side>("steps", "evidence");
+type Side = "steps" | "evidence" | "lesson";
+const isSide = oneOf<Side>("steps", "evidence", "lesson");
 
 const SHORTCUTS: ShortcutGroup[] = [
   {
@@ -162,6 +163,8 @@ export function Player({
   onBack,
 }: PlayerProps) {
   const playback = React.useMemo(() => play(replay), [replay]);
+  // A course teaches: its lessons lead, and there is nothing to audit.
+  const isCourse = replay.source === "course";
   const [filter, setFilter] = usePersistent<Filter>("filter", "changes", isFilter);
   const visible = React.useMemo(
     () =>
@@ -171,6 +174,8 @@ export function Player({
             filter === "all" ||
             (step.kind === "prompt" && step.agent === "main") ||
             step.kind === "commit" ||
+            step.kind === "lesson" ||
+            step.kind === "explain" ||
             Boolean(replay.notes[step.id]) ||
             (filter === "changes" && isChange(step)),
         )
@@ -198,14 +203,27 @@ export function Player({
   );
   const filesWidth = usePanelWidth("files-width", 272);
   const stepsWidth = usePanelWidth("notes-width", 340);
-  const [side, setSide] = usePersistent<Side>("side", "steps", isSide);
+  const [storedSide, setSide] = usePersistent<Side>(
+    isCourse ? "course-side" : "side",
+    isCourse ? "lesson" : "steps",
+    isSide,
+  );
+  const side: Side =
+    isCourse && storedSide === "evidence"
+      ? "lesson"
+      : !isCourse && storedSide === "lesson"
+        ? "steps"
+        : storedSide;
   const [help, setHelp] = React.useState(false);
   const filterRef = React.useRef<HTMLInputElement>(null);
   const repoFiles = useRepo(source);
 
   const frame = cursor > 0 ? playback.frames[cursor - 1] : undefined;
   // The last change so far — or, before any, the file the next one touches.
+  const explained =
+    frame?.step.kind === "explain" && frame.step.path ? frame.step : undefined;
   const followed =
+    explained?.path ??
     playback.focusAt(cursor) ??
     playback.frames.find((f) => f.index >= cursor && f.change)?.change?.path;
   // A file the reviewer picked holds the view until a change elsewhere
@@ -271,9 +289,19 @@ export function Player({
     progress: number;
     counts?: { added: number; removed: number };
     hideRemoved?: boolean;
+    focus?: readonly [number, number];
   } => {
     if (!path || !inReplay) return { content: null, progress: 1 };
     const now = playback.contentAt(path, cursor);
+    // An explanation about code shows the file as it stands, those lines lit.
+    if (explained && explained.path === path) {
+      const count = (now ?? "").split("\n").length;
+      return {
+        content: now,
+        progress: 1,
+        focus: explained.lines ?? [1, count],
+      };
+    }
     // The file as it reads — but a change being made to it still plays, its
     // new lines typed in place and marked, so playback is never a jump cut.
     if (view === "file" && lastChange !== undefined && lastChange === cursor - 1) {
@@ -300,7 +328,17 @@ export function Player({
     if (view === "base" && sinceBase)
       return { ...sinceBase, content: now, progress: 1 };
     return { content: now, progress: 1 };
-  }, [path, inReplay, playback, cursor, view, lastChange, progress, sinceBase]);
+  }, [
+    path,
+    inReplay,
+    playback,
+    cursor,
+    view,
+    lastChange,
+    progress,
+    sinceBase,
+    explained,
+  ]);
 
   // What the agent checked, and whether it held.
   const ledger = React.useMemo(
@@ -386,7 +424,15 @@ export function Player({
         "]": toggleSteps,
         e: () => {
           setStepsOpen(true);
-          setSide(side === "evidence" ? "steps" : "evidence");
+          setSide(
+            isCourse
+              ? side === "lesson"
+                ? "steps"
+                : "lesson"
+              : side === "evidence"
+                ? "steps"
+                : "evidence",
+          );
         },
         "/": () => {
           setFilesOpen(true);
@@ -416,6 +462,7 @@ export function Player({
     setStepsOpen,
     side,
     setSide,
+    isCourse,
   ]);
 
   const short = (sha?: string) => sha?.slice(0, 7);
@@ -457,8 +504,9 @@ export function Player({
 
   // How far along a history is: how much of the end state exists yet.
   const coverage = React.useMemo(
-    () => (replay.source === "git" ? playback.coverageAt(cursor) : undefined),
-    [replay.source, playback, cursor],
+    () =>
+      replay.source === "git" || isCourse ? playback.coverageAt(cursor) : undefined,
+    [replay.source, isCourse, playback, cursor],
   );
 
   const tree = repoFiles.tree;
@@ -528,6 +576,7 @@ export function Player({
         blameOf={blameOf}
         onBlame={onBlame}
         hideRemoved={shown.hideRemoved}
+        focus={shown.focus}
       />
     );
   }
@@ -694,31 +743,53 @@ export function Player({
                   label="Side panel"
                   value={side}
                   onChange={setSide}
-                  options={[
-                    {
-                      value: "steps",
-                      label: "Steps",
-                      hint: "Every step of the session (E)",
-                    },
-                    {
-                      value: "evidence",
-                      hint: "What the agent checked, and whether it held (E)",
-                      label: (
-                        <>
-                          Evidence
-                          {worries ? (
-                            <span className="rounded-full bg-warning-subtle px-1.5 text-2xs font-medium text-warning-ink tabular-nums">
-                              {worries}
-                            </span>
-                          ) : null}
-                        </>
-                      ),
-                    },
-                  ]}
+                  options={
+                    isCourse
+                      ? [
+                          {
+                            value: "lesson",
+                            label: "Lesson",
+                            hint: "The lesson, as it is taught (E)",
+                          },
+                          {
+                            value: "steps",
+                            label: "Steps",
+                            hint: "Every step of the course (E)",
+                          },
+                        ]
+                      : [
+                          {
+                            value: "steps",
+                            label: "Steps",
+                            hint: "Every step of the session (E)",
+                          },
+                          {
+                            value: "evidence",
+                            hint: "What the agent checked, and whether it held (E)",
+                            label: (
+                              <>
+                                Evidence
+                                {worries ? (
+                                  <span className="rounded-full bg-warning-subtle px-1.5 text-2xs font-medium text-warning-ink tabular-nums">
+                                    {worries}
+                                  </span>
+                                ) : null}
+                              </>
+                            ),
+                          },
+                        ]
+                  }
                 />
               </div>
               <div key={side} className="min-h-0 flex-1 overflow-auto">
-                {side === "steps" ? (
+                {side === "lesson" ? (
+                  <LessonPanel
+                    replay={replay}
+                    frames={playback.frames}
+                    cursor={cursor}
+                    onJump={jump}
+                  />
+                ) : side === "steps" ? (
                   <StepList
                     replay={replay}
                     frames={playback.frames}

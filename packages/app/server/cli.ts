@@ -9,13 +9,16 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import {
   annotate,
   concernsOf,
+  outline,
+  parseRanges,
   evidenceOf,
   isChange,
   play,
@@ -34,11 +37,26 @@ import {
 import Anthropic from "@anthropic-ai/sdk";
 
 import { DEFAULT_MODEL, explain } from "./explain.ts";
+import {
+  addExplain,
+  addLesson,
+  courseTarget,
+  example,
+  fill,
+  loadCourse,
+  progressOf,
+  startCourse,
+  take,
+  undo,
+  write,
+  type Course,
+} from "./course.ts";
 import { exportHtml, hasPlayer, playerDist } from "./export.ts";
 import { captureHistory } from "./history.ts";
 import { readPayload, runHook } from "./hook.ts";
 import { serve } from "./serve.ts";
 import { claudeSettings, hookCommand, installClaude, snippets } from "./setup.ts";
+import { installSkills, skill, skills } from "./skills.ts";
 import { saveReplay } from "./store.ts";
 
 const USAGE = `\`replay\` — agent sessions and git history, replayed change by change.
@@ -66,11 +84,42 @@ Works with Claude Code, Codex and Gemini CLI sessions, in any git repository.
     -o, --out <file.html>                     default: beside the replay, or here
   replay check [<replay.json>] [--session]    what the agent checked, and whether it
                                               held — exits 1 when something needs a look
+  replay course <command>                     teach a repository: rebuild it from nothing,
+                                              lesson by lesson — \`replay course help\`
+  replay skills [<name> | install [--user]]   the skills that teach a model these tools
   replay steps <replay.json>                  the steps a note can attach to
   replay annotate <replay.json> <notes.json|->
   replay setup [--project]                    capture automatically after every turn
   replay hook                                 what an agent's hook runs (reads its JSON)
 `;
+
+const COURSE_USAGE = `\`replay course\` — rebuild a repository from nothing, as lessons, for someone
+learning it. Every command appends one step to the course in .replays/ and
+prints where it stands; open it in the player at any moment to see it play.
+
+  start --title "<course>" [--to <rev>] [--path <dir>]…
+                              begin a course towards <rev> (HEAD), all of it or part
+  status [--all]              progress: files complete, partial, not started; next up
+  outline <path> [--lines a-b]
+                              the target file, numbered, with where each definition starts
+  lesson "<title>" [--goal "<what they will be able to do>"]
+                              start a lesson
+  explain [--file <path>] [--lines a-b] ["<markdown>" | -]
+                              teaching text (Markdown, $math$), about code when --file;
+                              --lines are the real file's (as outline and take count)
+  take <path> [--lines 1-20,45-80] [--why "<text>"]
+                              the next piece of a real file: those lines of it at the
+                              target — or all of it — exactly as they are there
+  write <path> [--why "<text>"] < content
+                              a hand-written version of a real file (a simpler draft)
+  example <path> [--why "<text>"] < content
+                              teaching material that is not part of the repository
+  fill [<path or glob>…] [--why "<text>"]
+                              bring every remaining matching file to the target
+  undo [<n>]                  take back the last step (or the last n)
+  check                       exit 0 only when every file matches the target
+
+All of them take --course <name> to pick a course other than the newest.`;
 
 const here = process.env.INIT_CWD ?? process.cwd();
 
@@ -106,6 +155,234 @@ function buildPlayer(): void {
     stdio: "inherit",
   });
   if (built.status !== 0) fail("could not build the player");
+}
+
+function lineCount(content: string): string {
+  const n = content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
+  return `${n} line${n === 1 ? "" : "s"}`;
+}
+
+/** Where a course stands, in one line: what a model reads after each step. */
+function courseLine(course: Course): string {
+  const target = courseTarget(course);
+  const p = progressOf(course, target);
+  const percent = p.totalLines ? Math.round((p.lines / p.totalLines) * 100) : 100;
+  return `${p.lessons} lesson${p.lessons === 1 ? "" : "s"} · ${p.steps} steps · ${p.complete}/${p.files.length} files complete${p.partial ? `, ${p.partial} partial` : ""} · ${percent}% of lines`;
+}
+
+function readStdin(): string {
+  if (process.stdin.isTTY) fail("expected the text on stdin (a heredoc or a pipe)");
+  try {
+    return readFileSync(0, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function runCourse(args: string[]): void {
+  const [sub = "help", ...more] = args;
+  if (sub === "help" || more.includes("--help") || more.includes("-h")) {
+    print(COURSE_USAGE);
+    return;
+  }
+  const { values, positionals } = parseArgs({
+    args: more,
+    allowPositionals: true,
+    options: {
+      course: { type: "string" },
+      repo: { type: "string" },
+      title: { type: "string" },
+      to: { type: "string" },
+      path: { type: "string", multiple: true },
+      goal: { type: "string" },
+      file: { type: "string" },
+      lines: { type: "string" },
+      why: { type: "string" },
+      all: { type: "boolean" },
+    },
+  });
+  const root = git.repoRoot(values.repo ? resolve(here, values.repo) : here);
+  if (!root) fail("not in a git repository (pass --repo)");
+  // Paths as git names them: relative to the root, whatever directory we are in.
+  const repoPath = (path: string) =>
+    relative(root, resolve(here, path)).split("\\").join("/");
+
+  if (sub === "start") {
+    if (!values.title)
+      fail('usage: replay course start --title "<course>" [--to <rev>] [--path <dir>]');
+    const course = startCourse(root, {
+      title: values.title,
+      rev: values.to,
+      paths: values.path?.map(repoPath),
+    });
+    const target = courseTarget(course);
+    const order = [...target.files.entries()];
+    print(
+      [
+        `Started "${values.title}" → ${relative(here, course.file) || course.file}`,
+        `  towards ${target.rev.slice(0, 7)}: ${order.length} files to build${target.skipped.length ? `, ${target.skipped.length} left out (lockfiles, binaries, very large)` : ""}`,
+        "  In build order (what a file uses comes first):",
+        ...order
+          .slice(0, 60)
+          .map(([path, content]) => `    ${path}  (${lineCount(content)})`),
+        ...(order.length > 60
+          ? [`    … and ${order.length - 60} more — \`replay course status --all\``]
+          : []),
+      ].join("\n"),
+    );
+    return;
+  }
+
+  let course = loadCourse(root, values.course);
+  const target = courseTarget(course);
+  const ranges = values.lines ? parseRanges(values.lines) : undefined;
+
+  switch (sub) {
+    case "status": {
+      const p = progressOf(course, target);
+      const lines = [
+        `"${course.replay.title}" → ${target.rev.slice(0, 7)}  (${course.name})`,
+        `  ${courseLine(course)}`,
+      ];
+      const partial = p.files.filter((f) => f.status === "partial");
+      if (partial.length) {
+        lines.push("  Partial:");
+        for (const f of partial)
+          lines.push(`    ${f.path}  ${f.lines}/${f.totalLines} lines`);
+      }
+      const missing = p.files.filter((f) => f.status === "missing");
+      if (missing.length) {
+        lines.push(values.all ? "  Not started:" : "  Next, in build order:");
+        for (const f of values.all ? missing : missing.slice(0, 8))
+          lines.push(
+            `    ${f.path}  (${f.totalLines} line${f.totalLines === 1 ? "" : "s"})`,
+          );
+        if (!values.all && missing.length > 8)
+          lines.push(`    … ${missing.length - 8} more (--all)`);
+      }
+      if (p.extra.length)
+        lines.push(
+          `  ! Not in the target (undo them, or make them examples): ${p.extra.join(", ")}`,
+        );
+      if (!partial.length && !missing.length && !p.extra.length)
+        lines.push("  Complete: every file matches the target.");
+      print(lines.join("\n"));
+      return;
+    }
+    case "outline": {
+      const [path] = positionals;
+      if (!path) fail("usage: replay course outline <path> [--lines a-b]");
+      const content = target.files.get(repoPath(path));
+      if (content === undefined) fail(`${path} is not in the course's target`);
+      const symbols = outline(content);
+      const numbered = content.split("\n");
+      if (content.endsWith("\n")) numbered.pop();
+      const [from, to] = ranges?.[0] ?? [1, numbered.length];
+      print(
+        [
+          `${repoPath(path)} — ${numbered.length} lines at ${target.rev.slice(0, 7)}`,
+          ...(symbols.length
+            ? [
+                "  Definitions:",
+                ...symbols.map(
+                  (s) => `    ${String(s.line).padStart(5)}  ${s.kind} ${s.name}`,
+                ),
+              ]
+            : []),
+          "",
+          ...numbered
+            .slice(from - 1, to)
+            .map((line, i) => `${String(from + i).padStart(5)}  ${line}`),
+        ].join("\n"),
+      );
+      return;
+    }
+    case "lesson": {
+      const title = positionals.join(" ").trim();
+      if (!title) fail('usage: replay course lesson "<title>" [--goal "<text>"]');
+      course = addLesson(course, title, values.goal);
+      break;
+    }
+    case "explain": {
+      const text =
+        positionals.length === 0 || positionals[0] === "-"
+          ? readStdin()
+          : positionals.join(" ");
+      const about = values.file
+        ? {
+            path: repoPath(values.file),
+            ...(ranges
+              ? { lines: [ranges[0]![0], ranges.at(-1)![1]] as [number, number] }
+              : {}),
+          }
+        : undefined;
+      course = addExplain(course, target, text, about);
+      break;
+    }
+    case "take": {
+      const [path] = positionals;
+      if (!path)
+        fail("usage: replay course take <path> [--lines 1-20,45-80] [--why <text>]");
+      course = take(course, target, repoPath(path), ranges, values.why);
+      break;
+    }
+    case "write":
+    case "example": {
+      const [path] = positionals;
+      if (!path) fail(`usage: replay course ${sub} <path> [--why <text>] < content`);
+      const content = readStdin();
+      course =
+        sub === "write"
+          ? write(course, target, repoPath(path), content, values.why)
+          : example(course, target, repoPath(path), content, values.why);
+      break;
+    }
+    case "fill": {
+      const result = fill(course, target, positionals.map(repoPath), values.why);
+      course = result.course;
+      print(
+        `Filled ${result.filled.length} file${result.filled.length === 1 ? "" : "s"}.`,
+      );
+      break;
+    }
+    case "undo": {
+      const count = positionals[0] ? positiveInteger(positionals[0], "undo") : 1;
+      const result = undo(course, count);
+      course = result.course;
+      print(
+        `Took back ${result.removed.map((step) => step.kind).join(", ") || "nothing"}.`,
+      );
+      break;
+    }
+    case "check": {
+      const p = progressOf(course, target);
+      const wrong = p.files.filter((f) => f.status !== "complete");
+      if (!wrong.length && !p.extra.length) {
+        print(
+          `Complete: all ${p.files.length} files match ${target.rev.slice(0, 7)}. ${courseLine(course)}`,
+        );
+        return;
+      }
+      print(
+        [
+          `Not complete: ${courseLine(course)}`,
+          ...wrong
+            .slice(0, 20)
+            .map(
+              (f) =>
+                `  ${f.status === "missing" ? "·" : "◐"} ${f.path}  ${f.lines}/${f.totalLines} lines`,
+            ),
+          ...(wrong.length > 20 ? [`  … ${wrong.length - 20} more`] : []),
+          ...p.extra.map((path) => `  ! not in the target: ${path}`),
+        ].join("\n"),
+      );
+      process.exitCode = 1;
+      return;
+    }
+    default:
+      fail(`unknown course command "${sub}" — see \`replay course help\``);
+  }
+  print(`✓ ${courseLine(course)}`);
 }
 
 function print(text: string): void {
@@ -182,7 +459,10 @@ function printSteps(replay: Replay): void {
 // No command opens the player: `npx agentreplay` should show something.
 const [given = "open", ...rest] = process.argv.slice(2);
 // `replay <command> --help` is the usage, like `replay help`.
-const command = rest.includes("--help") || rest.includes("-h") ? "help" : given;
+const command =
+  given !== "course" && (rest.includes("--help") || rest.includes("-h"))
+    ? "help"
+    : given;
 
 switch (command) {
   case "list": {
@@ -413,6 +693,44 @@ switch (command) {
     if (!concerns.length) lines.push("  Every check passed after the last change.");
     print(lines.join("\n"));
     process.exitCode = concerns.length ? 1 : 0;
+    break;
+  }
+
+  case "course": {
+    runCourse(rest);
+    break;
+  }
+
+  case "skills": {
+    const [name] = rest;
+    if (name === "install") {
+      const { values } = parseArgs({
+        args: rest.slice(1),
+        options: { user: { type: "boolean" } },
+      });
+      const into = values.user
+        ? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "skills")
+        : join(git.repoRoot(here) ?? here, ".claude", "skills");
+      const names = installSkills(into);
+      print(`Installed ${names.join(", ")} → ${relative(here, into) || into}`);
+      break;
+    }
+    if (name) {
+      const text = skill(name);
+      if (!text) fail(`no skill "${name}" — \`replay skills\` lists them`);
+      print(text);
+    } else {
+      print(
+        [
+          "Skills that teach a model to use replay — print one and give it to any agent:",
+          "",
+          ...skills().map((s) => `  ${s.name.padEnd(16)} ${s.description}`),
+          "",
+          "  replay skills <name>             the skill itself (Markdown), for any agent",
+          "  replay skills install [--user]   copy them into .claude/skills (or ~/.claude/skills)",
+        ].join("\n"),
+      );
+    }
     break;
   }
 

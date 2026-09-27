@@ -43,6 +43,11 @@ function dwellSeconds(frame: Frame): number {
       return step.failed ? 1.4 : 0.9;
     case "commit":
       return Math.min(3, 1.2 + (step.body ?? "").length / 500);
+    case "lesson":
+      return 2.5 + (step.goal ?? "").length / 60;
+    case "explain":
+      // Teaching text is read, not skimmed: about 200 words a minute.
+      return Math.min(30, Math.max(2.5, step.text.split(/\s+/).length / 3.3));
     default:
       return 1;
   }

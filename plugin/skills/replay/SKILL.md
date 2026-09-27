@@ -1,6 +1,6 @@
 ---
 name: replay
-description: Save this agent session as a replay a reviewer can play back change by change, with notes on the parts that need a careful look. Use at the end of any session that changed code — before or instead of a PR — or when the user asks to "capture", "save", "record" or "replay" the session. Works for Claude Code, Codex and Gemini CLI sessions alike.
+description: Save this agent session as a replay a reviewer can play back change by change, with notes on the parts that need a careful look and a check of the evidence. Use at the end of any session that changed code — before or instead of a PR — or when the user asks to "capture", "save", "record" or "replay" the session. Works for Claude Code, Codex and Gemini CLI sessions alike.
 ---
 
 # Replay
@@ -88,20 +88,13 @@ Then tell the person where it is and how to open it. To hand it to someone
 without the repository, `replay export .replays/<file>.json` writes one HTML
 file that plays offline.
 
-## Explaining a repository's history
+## Related skills
 
-When the person wants to learn or review a codebase rather than a session:
-
-```bash
-replay history --path <package> --learn --from <rev>
-replay explain .replays/<file>.json      # needs ANTHROPIC_API_KEY or `ant auth login`
-```
-
-Without credentials, write the notes yourself (or with a small-model
-subagent): for each commit step a sentence on what it changed and why, and on
-the first step a tour — which files to read first, which functions carry the
-weight — then `replay annotate` as above. The step ids are `commit:<sha>` and
-`<sha>:<path>`.
+- **replay-review** — review a captured session: the evidence, the risky
+  steps, notes, and a file to attach to the pull request.
+- **replay-teach** — teach a repository by rebuilding it from nothing as a
+  course.
+- **replay-history** — replay and explain a repository's commits.
 
 ## What it can and cannot show
 

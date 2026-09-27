@@ -7,13 +7,13 @@ it.
 
 ## Layout
 
-|                  |                                                                                                                                                                                    |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bin/replay.mjs` | The command: checks Node, then runs the bundled CLI (a package) or `server/cli.ts` from source (a checkout)                                                                        |
-| `server/`        | Node: session discovery (`sessions.ts`), git (`git.ts`), capture, the `.replays/` store, projects, hooks and setup, `explain`, `export`, and the `/api` handler                    |
-| `src/`           | The player: the library (`library.tsx`, project picker, folder dialog) and `player/` — the playback clock, the diff timeline, code pane, caption, files, steps and evidence panels |
-| `src/ui/`        | The few controls the player needs: tree, timeline scrubber, resizable panel, select, popover, dialog, shortcuts sheet, theme                                                       |
-| `scripts/`       | `package.mjs`, which builds the npm package                                                                                                                                        |
+|                  |                                                                                                                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bin/replay.mjs` | The command: checks Node, then runs the bundled CLI (a package) or `server/cli.ts` from source (a checkout)                                                                                                                     |
+| `server/`        | Node: session discovery (`sessions.ts`), git (`git.ts`), capture, the `.replays/` store, projects, hooks and setup, `explain`, `export`, and the `/api` handler                                                                 |
+| `src/`           | The player: the library (`library.tsx`, project picker, folder dialog) and `player/` — the playback clock, the diff timeline, code pane, caption, files, steps, evidence and lesson panels, and the Markdown and maths renderer |
+| `src/ui/`        | The few controls the player needs: tree, timeline scrubber, resizable panel, select, popover, dialog, shortcuts sheet, theme                                                                                                    |
+| `scripts/`       | `package.mjs`, which builds the npm package                                                                                                                                                                                     |
 
 The design tokens are in `src/styles.css`: a handful of semantic colours
 defined once per theme and registered with Tailwind. Components name the role

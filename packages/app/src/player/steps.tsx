@@ -1,17 +1,20 @@
 import type { Frame, NoteLevel, Replay, Step } from "@agent-replay/core";
 import { cn } from "@/ui";
 import {
+  BookOpen,
   FileMinus,
   FilePen,
   FilePlus,
   FileTerminal,
   GitCommitHorizontal,
+  Lightbulb,
   MessageSquare,
   Terminal,
 } from "lucide-react";
 import * as React from "react";
 
 import { firstLine, stepLabel, when } from "../labels";
+import { Markdown } from "./markdown";
 
 const NOTE: Record<
   NoteLevel,
@@ -56,6 +59,10 @@ export function StepIcon({ frame, className }: { frame: Frame; className: string
       return <Terminal aria-hidden className={className} />;
     case "commit":
       return <GitCommitHorizontal aria-hidden className={className} />;
+    case "lesson":
+      return <BookOpen aria-hidden className={className} />;
+    case "explain":
+      return <Lightbulb aria-hidden className={className} />;
     default:
       return <MessageSquare aria-hidden className={className} />;
   }
@@ -229,6 +236,10 @@ function Body({ step }: { step: Step }) {
     case "prompt":
     case "say":
       return <Fold text={step.text} className="text-text-high" />;
+    case "lesson":
+      return step.goal ? <p className="text-text-mid">{step.goal}</p> : null;
+    case "explain":
+      return <Markdown text={step.text} />;
     case "external":
       return (
         <p className="text-text-mid">
@@ -301,7 +312,11 @@ export const StepList = React.memo(function StepList({
     const shown = new Set(visible);
     let group: { prompt?: Frame; rows: Frame[] } = { rows: [] };
     for (const frame of frames) {
-      if (frame.step.kind === "prompt" && frame.step.agent === "main") {
+      // A prompt heads what answered it; in a course, a lesson heads its steps.
+      if (
+        (frame.step.kind === "prompt" && frame.step.agent === "main") ||
+        frame.step.kind === "lesson"
+      ) {
         if (group.prompt || group.rows.length) out.push(group);
         group = { prompt: frame, rows: [] };
         continue;
@@ -349,7 +364,9 @@ export const StepList = React.memo(function StepList({
       </button>
       {groups.map((group, g) => (
         <section key={group.prompt?.index ?? `g${g}`} className="flex flex-col">
-          {group.prompt && group.prompt.step.kind === "prompt" ? (
+          {group.prompt &&
+          (group.prompt.step.kind === "prompt" ||
+            group.prompt.step.kind === "lesson") ? (
             <button
               type="button"
               onClick={() => onJump(group.prompt!.index + 1)}
@@ -359,15 +376,20 @@ export const StepList = React.memo(function StepList({
               )}
             >
               <span className="text-2xs text-text-low">
-                Prompt · {when(group.prompt.step.at, replay)}
+                {group.prompt.step.kind === "lesson"
+                  ? `Lesson ${g + (groups[0]?.prompt ? 1 : 0)}`
+                  : `Prompt · ${when(group.prompt.step.at, replay)}`}
               </span>
               <span
                 className={cn(
                   "line-clamp-2 text-xs",
+                  group.prompt.step.kind === "lesson" && "font-medium",
                   group.prompt.index <= current ? "text-text-high" : "text-text-low",
                 )}
               >
-                {firstLine(group.prompt.step.text, 200)}
+                {group.prompt.step.kind === "lesson"
+                  ? group.prompt.step.title
+                  : firstLine(group.prompt.step.text, 200)}
               </span>
             </button>
           ) : null}

@@ -57,6 +57,8 @@ export interface EditStep extends StepBase {
   replaceAll: boolean;
   /** The command step that made it, when a shell command did rather than a tool. */
   via?: string;
+  /** Teaching material — an example, a worked note — not part of the repository. */
+  aside?: true;
 }
 
 /** A whole-file write: a new file, or a rewrite of an existing one. */
@@ -66,6 +68,8 @@ export interface WriteStep extends StepBase {
   content: string;
   /** The command step that made it, when a shell command did rather than a tool. */
   via?: string;
+  /** Teaching material — an example, a worked note — not part of the repository. */
+  aside?: true;
 }
 
 /** A file removed by a tool call (Codex's `*** Delete File:`, say). */
@@ -108,6 +112,29 @@ export interface CommitStep extends StepBase {
   author?: string;
 }
 
+/**
+ * A chapter of a course: what the steps after it build, and what the learner
+ * will be able to do at its end. Courses rebuild a repository from nothing,
+ * for someone learning it, rather than record what an agent did.
+ */
+export interface LessonStep extends StepBase {
+  kind: "lesson";
+  title: string;
+  goal?: string;
+}
+
+/**
+ * Teaching prose, in Markdown — with `$…$` and `$$…$$` for mathematics. When
+ * it is about particular code, `path` and `lines` (1-based, inclusive, in the
+ * file as it stands at this step) say which, and the player shows them.
+ */
+export interface ExplainStep extends StepBase {
+  kind: "explain";
+  text: string;
+  path?: string;
+  lines?: [number, number];
+}
+
 /** A shell command and what it printed (truncated, secrets redacted). */
 export interface CommandStep extends StepBase {
   kind: "command";
@@ -125,7 +152,9 @@ export type Step =
   | DeleteStep
   | ExternalStep
   | CommandStep
-  | CommitStep;
+  | CommitStep
+  | LessonStep
+  | ExplainStep;
 
 export type StepKind = Step["kind"];
 
@@ -168,6 +197,14 @@ export interface ReplayRepo {
   commits: Commit[];
 }
 
+/** What a course rebuilds: a repository at one revision, or part of it. */
+export interface CourseTarget {
+  /** The commit whose files the course arrives at. */
+  rev: string;
+  /** Only these paths (directories or files); every file when absent. */
+  paths?: string[];
+}
+
 export interface Replay {
   version: typeof REPLAY_VERSION;
   /** The session id. */
@@ -188,4 +225,6 @@ export interface Replay {
   steps: Step[];
   /** Reviewer-facing explanations, by step id. */
   notes: Record<string, Note>;
+  /** Present on a course (`source: "course"`): what it rebuilds. */
+  course?: CourseTarget;
 }

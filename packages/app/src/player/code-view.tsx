@@ -91,6 +91,8 @@ export interface Blame {
 
 interface CodeLineProps {
   line: Line;
+  /** Part of what is being explained. */
+  lit?: boolean;
   origin?: Origin;
   sources: Sources;
   lineRef?: React.Ref<HTMLDivElement>;
@@ -100,7 +102,15 @@ interface CodeLineProps {
 }
 
 const CodeLine = React.memo(
-  function CodeLine({ line, origin, sources, lineRef, blame, onBlame }: CodeLineProps) {
+  function CodeLine({
+    line,
+    lit,
+    origin,
+    sources,
+    lineRef,
+    blame,
+    onBlame,
+  }: CodeLineProps) {
     const sign = SIGN[line.kind];
     return (
       <div
@@ -112,11 +122,14 @@ const CodeLine = React.memo(
           // the typing lands where it should.
           "flex [contain-intrinsic-size:auto_1.375rem] [content-visibility:auto]",
           ROW[line.kind],
+          lit && "bg-emphasis-subtle",
           blame && line.kind === "context" && "bg-hover",
         )}
       >
         <span aria-hidden className="flex w-3 shrink-0 justify-center">
-          {origin && origin !== "base" ? (
+          {lit ? (
+            <span className="w-0.5 self-stretch bg-emphasis" />
+          ) : origin && origin !== "base" ? (
             <span className={cn("w-0.5 self-stretch", ORIGIN[origin])} />
           ) : null}
         </span>
@@ -160,6 +173,7 @@ const CodeLine = React.memo(
   },
   (a, b) =>
     a.line.key === b.line.key &&
+    a.lit === b.lit &&
     a.origin === b.origin &&
     a.sources === b.sources &&
     a.lineRef === b.lineRef &&
@@ -182,6 +196,8 @@ export interface CodeViewProps {
   onBlame?: (step: number) => void;
   /** The file as it reads: the change's new lines marked, its old ones gone. */
   hideRemoved?: boolean;
+  /** Lines being explained (1-based, inclusive): lit, and brought into view. */
+  focus?: readonly [number, number];
 }
 
 export function CodeView({
@@ -193,6 +209,7 @@ export function CodeView({
   blameOf,
   onBlame,
   hideRemoved,
+  focus,
 }: CodeViewProps) {
   const lines = React.useMemo(() => {
     if (!diff) return plainLines(content ?? "");
@@ -214,7 +231,14 @@ export function CodeView({
 
   const scroller = React.useRef<HTMLDivElement>(null);
   const target = lines.findIndex((line) => line.caret !== undefined);
-  const anchor = target >= 0 ? target : lines.findIndex((line) => line.hot);
+  const focused = (line: Line) =>
+    focus !== undefined &&
+    line.number !== null &&
+    line.number >= focus[0] &&
+    line.number <= focus[1];
+  const lit = focus ? lines.findIndex(focused) : -1;
+  const anchor =
+    target >= 0 ? target : lit >= 0 ? lit : lines.findIndex((line) => line.hot);
   const anchorRef = React.useRef<HTMLDivElement>(null);
 
   // Keep the typing point — or, before it, the start of the change — in the
@@ -267,6 +291,7 @@ export function CodeView({
           origin={line.number === null ? undefined : origins?.[line.number - 1]}
           sources={sources}
           lineRef={i === anchor ? anchorRef : undefined}
+          lit={focused(line)}
           blame={line.number !== null && line.number - 1 === hover ? blame : undefined}
           onBlame={onBlame}
         />

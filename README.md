@@ -47,6 +47,12 @@ record and nothing to configure: it reads the logs your agents already write.
   placed after the command that most likely made them. Files an agent writes
   with a heredoc (`cat > file <<'EOF'`) replay as the writes they are. The
   replay's end state is always the repository's end state.
+- **Courses: learn a repository from zero.** A model rebuilds the repository
+  from an empty folder to its current state as lessons — the real code
+  arriving a piece at a time, with explanations of the design, the functions
+  and the mathematics beside it. Built for codebases written largely by AI,
+  where replaying every commit is not the point: what matters is the code as
+  it is now.
 - **Git history too.** `replay history` plays a repository commit by commit,
   and `--learn` introduces an existing codebase file by file, in reading
   order.
@@ -63,7 +69,7 @@ replay                          # the player
 replay setup                    # capture automatically after every agent turn
 ```
 
-**Claude Code plugin** — the replay skill and the capture-after-every-turn hook
+**Claude Code plugin** — the four skills and the capture-after-every-turn hook
 in one step:
 
 ```bash
@@ -86,7 +92,7 @@ is already there; **Open folder…** adds any other), open a session and press
 | `Home` `End` | the base commit / the end                            |
 | `N` `P`      | next / previous note                                 |
 | `V`          | the code view: change → since base → file            |
-| `E`          | steps or evidence                                    |
+| `E`          | steps or evidence (in a course: lesson or steps)     |
 | `[` `]`      | show / hide the files / the side panel               |
 | `/`          | filter the files                                     |
 | `?`          | every shortcut                                       |
@@ -142,6 +148,38 @@ at once; it never fails the agent's turn.
 | **Codex**       | `~/.codex/sessions/YYYY/MM/DD/rollout-…jsonl[.zst]` | `notify` in `~/.codex/config.toml` (printed)        |
 | **Gemini CLI**  | `~/.gemini/tmp/<project>/chats/session-…jsonl`      | `AfterAgent` in `~/.gemini/settings.json` (printed) |
 
+### Learn a repository: courses
+
+Ask your agent to teach you the repository — with the plugin installed, or
+after `replay skills install`, it knows how:
+
+> Teach me this repository. Build it up from scratch as a course.
+
+It follows the `replay-teach` skill: reads the code, plans lessons from the
+foundations up, then writes the course with `replay course` commands. Every
+piece of code comes from the repository itself (`take` a file, or chosen
+lines of it), so what you watch being built is exactly the code that exists.
+Beside it, the **Lesson** panel shows the explanations as they are written —
+Markdown, tables and maths (`$…$`, `$$…$$`) — and lights up the lines each one
+is about. Examples and exercises live in `learn/` and are marked as teaching
+material. The footer shows how much of the repository the course has built.
+
+```bash
+replay course start --title "Learn vec" [--path packages/core] [--to v2.0]
+replay course lesson "Vectors are plain data" --goal "Know what a Vec is."
+replay course explain - <<'MD'                   # Markdown with $maths$, on stdin
+replay course take src/vec.ts --lines 1-12       # the next piece of a real file
+replay course explain --file src/vec.ts --lines 10-12 "The dot product …"
+replay course example learn/try.ts < try.ts      # teaching material
+replay course fill "*.json" .github/             # boilerplate, in one go
+replay course status                             # progress, and what is next
+replay course check                              # exit 0 when it matches the repository
+```
+
+A course is an ordinary replay in `.replays/`: open it in the player at any
+moment while it is being written, export it, commit it. When it ends,
+`replay history --from <its revision>` carries on commit by commit.
+
 ### Learn a codebase from its history
 
 ```bash
@@ -151,20 +189,35 @@ replay history --path packages/api --learn --from HEAD~50
 replay explain .replays/<file>.json               # a small model's notes (needs ANTHROPIC_API_KEY)
 ```
 
+## Skills
+
+Four skills teach a model to use the tools — for Claude Code they come with
+the plugin, and `replay skills install` copies them into `.claude/skills/`.
+For any other agent, `replay skills <name>` prints one to hand over.
+
+| Skill            | For                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `replay`         | Capturing a session at its end, with notes on the steps that need a careful look         |
+| `replay-review`  | Reviewing an agent's session: the evidence, the risky steps, a file for the pull request |
+| `replay-teach`   | Teaching a repository by rebuilding it from nothing as a course                          |
+| `replay-history` | Replaying and explaining a repository's commits                                          |
+
 ## Commands
 
-| Command                                      |                                                                |
-| -------------------------------------------- | -------------------------------------------------------------- |
-| `replay [open] [--port 5180] [--no-browser]` | The player and its local API                                   |
-| `replay list`                                | Agent sessions on this machine, newest first                   |
-| `replay capture [--session] [--title] …`     | Save a session to `<repo>/.replays/`                           |
-| `replay export [<file>] [--session] [-o]`    | One self-contained HTML file                                   |
-| `replay check [<file>] [--session]`          | What was checked and whether it held; exit 1 when worth a look |
-| `replay history [--from] [--to] [--learn]`   | Replay git history                                             |
-| `replay explain <file> [--model]`            | A small model's notes per commit or turn                       |
-| `replay steps <file>`                        | Step ids, for notes                                            |
-| `replay annotate <file> <notes.json \| ->`   | Merge notes by step id                                         |
-| `replay setup [--project]`                   | Install the Claude Code hook; print Codex and Gemini lines     |
+| Command                                      |                                                                                               |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `replay [open] [--port 5180] [--no-browser]` | The player and its local API                                                                  |
+| `replay list`                                | Agent sessions on this machine, newest first                                                  |
+| `replay capture [--session] [--title] …`     | Save a session to `<repo>/.replays/`                                                          |
+| `replay export [<file>] [--session] [-o]`    | One self-contained HTML file                                                                  |
+| `replay check [<file>] [--session]`          | What was checked and whether it held; exit 1 when worth a look                                |
+| `replay course <command>`                    | Write a course: `start`, `lesson`, `explain`, `take`, `example`, `fill`, `status`, `check`, … |
+| `replay skills [<name> \| install]`          | The skills that teach a model these tools: print one, or install them all                     |
+| `replay history [--from] [--to] [--learn]`   | Replay git history                                                                            |
+| `replay explain <file> [--model]`            | A small model's notes per commit or turn                                                      |
+| `replay steps <file>`                        | Step ids, for notes                                                                           |
+| `replay annotate <file> <notes.json \| ->`   | Merge notes by step id                                                                        |
+| `replay setup [--project]`                   | Install the Claude Code hook; print Codex and Gemini lines                                    |
 
 `replay <command> --help` prints the usage; `REPLAY_DEBUG=1` shows a stack on
 any failure.

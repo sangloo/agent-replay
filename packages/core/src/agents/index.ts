@@ -73,5 +73,6 @@ export function parseTranscript(log: Log, agent = "main"): Transcript {
 
 export function agentName(id: string): string {
   if (id === "git") return "Git history";
+  if (id === "course") return "Course";
   return ADAPTERS.find((adapter) => adapter.id === id)?.name ?? id;
 }

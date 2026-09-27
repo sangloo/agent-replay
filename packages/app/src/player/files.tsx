@@ -12,19 +12,21 @@ import { ancestorIds, DIR_ID, FILE_ID, treeLines } from "./tree-lines";
  * is a file the replay changes later: listed, quietly, so the shape of the
  * whole change is there from the first frame.
  */
-type Mark = "added" | "modified" | "deleted" | "ahead";
+type Mark = "added" | "modified" | "deleted" | "ahead" | "example";
 
 const INK: Record<Mark, string> = {
   added: "text-success-ink",
   modified: "text-warning-ink",
   deleted: "text-danger-ink",
   ahead: "text-text-low",
+  example: "text-info-ink",
 };
 
 const LETTER: Record<Exclude<Mark, "ahead">, string> = {
   added: "A",
   modified: "M",
   deleted: "D",
+  example: "Ex",
 };
 
 const NAME: Record<Mark, string> = {
@@ -32,12 +34,14 @@ const NAME: Record<Mark, string> = {
   modified: "modified",
   deleted: "deleted",
   ahead: "changed later",
+  example: "teaching material, not part of the repository",
 };
 
 const PILL: Record<Exclude<Mark, "ahead">, string> = {
   added: "bg-success-subtle text-success-ink",
   modified: "bg-warning-subtle text-warning-ink",
   deleted: "bg-danger-subtle text-danger-ink",
+  example: "bg-info-subtle text-info-ink",
 };
 
 const DOT: Record<Mark, string> = {
@@ -45,17 +49,20 @@ const DOT: Record<Mark, string> = {
   modified: "bg-warning",
   deleted: "bg-danger",
   ahead: "bg-line-high",
+  example: "bg-info",
 };
 
 function markOf(file: FileEntry): Mark | undefined {
   if (!file.touched || file.absent) return "ahead";
+  if (file.aside) return "example";
   if (file.status === "unchanged") return undefined;
   return file.status;
 }
 
 /** A folder's mark: one kind throughout says so; a mix is a modification. */
 function rollUp(marks: readonly Mark[]): Mark {
-  const reached = marks.filter((mark) => mark !== "ahead");
+  const reached = marks.filter((mark) => mark !== "ahead" && mark !== "example");
+  if (reached.length === 0 && marks.includes("example")) return "example";
   if (reached.length === 0) return "ahead";
   return reached.every((mark) => mark === reached[0]) ? reached[0]! : "modified";
 }
@@ -322,7 +329,7 @@ const FileTree = React.memo(function FileTree({
               <span
                 title={NAME[mark]}
                 className={cn(
-                  "grid size-4 place-items-center rounded-[4px] font-mono text-2xs font-medium",
+                  "grid h-4 min-w-4 place-items-center rounded-[4px] px-0.5 font-mono text-2xs font-medium",
                   PILL[mark],
                 )}
               >

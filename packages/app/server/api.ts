@@ -72,6 +72,7 @@ export interface SavedListing {
   steps: number;
   changes: number;
   notes: number;
+  lessons?: number;
 }
 
 export interface SessionListing {

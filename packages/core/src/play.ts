@@ -1,7 +1,7 @@
 /**
  * Replay → any moment of it.
  *
- * A cursor counts steps applied, the way `HistoryScrubber` does: `0` is the
+ * A cursor counts steps applied, the way the player's timeline does: `0` is the
  * base commit, `steps.length` is the end of the session. Every file's
  * versions are computed once, up front, so moving the cursor anywhere —
  * scrubbing backwards included — is a lookup rather than a re-run.
@@ -47,6 +47,8 @@ export interface FileEntry {
   omitted: boolean;
   /** The file does not exist at the cursor, and never did before it. */
   absent: boolean;
+  /** Teaching material a course wrote, not part of the repository. */
+  aside?: boolean;
 }
 
 export interface Playback {
@@ -123,6 +125,12 @@ export function play(replay: Replay): Playback {
 
   const omitted = new Set(replay.omitted);
   const paths = [...versions.keys()].sort((a, b) => a.localeCompare(b));
+  // A course's examples and notes: shown, but no part of what it rebuilds.
+  const asides = new Set(
+    replay.steps.flatMap((step) =>
+      (step.kind === "write" || step.kind === "edit") && step.aside ? [step.path] : [],
+    ),
+  );
 
   const filesAt = (cursor: number): FileEntry[] =>
     paths.map((path) => {
@@ -149,6 +157,7 @@ export function play(replay: Replay): Playback {
         touched,
         omitted: omitted.has(path),
         absent: base === null && now === null,
+        ...(asides.has(path) ? { aside: true } : {}),
       };
     });
 
@@ -189,6 +198,7 @@ export function play(replay: Replay): Playback {
 
   const endLines = new Map<string, number>();
   for (const path of paths) {
+    if (asides.has(path)) continue;
     const end = contentAt(path, frames.length);
     if (end !== null) endLines.set(path, splitLines(end).length);
   }
@@ -209,6 +219,7 @@ export function play(replay: Replay): Playback {
   let added = 0;
   let removed = 0;
   for (const path of paths) {
+    if (asides.has(path)) continue;
     const base = contentAt(path, 0);
     const end = contentAt(path, frames.length);
     if (base === end) continue;
@@ -218,8 +229,9 @@ export function play(replay: Replay): Playback {
   }
   const changedFiles = paths.filter(
     (path) =>
-      contentAt(path, 0) !== contentAt(path, frames.length) ||
-      (omitted.has(path) && versions.get(path)!.length > 1),
+      !asides.has(path) &&
+      (contentAt(path, 0) !== contentAt(path, frames.length) ||
+        (omitted.has(path) && versions.get(path)!.length > 1)),
   ).length;
 
   return {

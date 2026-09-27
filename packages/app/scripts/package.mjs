@@ -65,6 +65,8 @@ mkdirSync(join(out, "bin"));
 cpSync(join(app, "bin/replay.mjs"), join(out, "bin/replay.mjs"));
 cpSync(join(app, "publish-readme.md"), join(out, "README.md"));
 cpSync(join(app, "../../LICENSE"), join(out, "LICENSE"));
+// The skills, so `replay skills <name>` can hand them to any agent.
+cpSync(join(app, "../../plugin/skills"), join(out, "skills"), { recursive: true });
 writeFileSync(
   join(out, "package.json"),
   `${JSON.stringify(
@@ -74,7 +76,7 @@ writeFileSync(
       description: publish.description,
       type: "module",
       bin: { replay: "bin/replay.mjs", [publish.name]: "bin/replay.mjs" },
-      files: ["bin", "server", "dist", "README.md", "LICENSE"],
+      files: ["bin", "server", "dist", "skills", "README.md", "LICENSE"],
       engines: { node: ">=20" },
       keywords: publish.keywords,
       license: publish.license,

@@ -5,6 +5,7 @@ import * as React from "react";
 import { cn, Kbd } from "@/ui";
 
 import { firstLine, stepLabel, when } from "../labels";
+import { plainText } from "./markdown-parse";
 import { StepIcon } from "./steps";
 
 export interface CaptionProps {
@@ -98,6 +99,20 @@ export const Caption = React.memo(function Caption({
     case "commit":
       title = `Commit ${step.sha.slice(0, 7)}`;
       body = <Text>{step.subject}</Text>;
+      break;
+    case "lesson": {
+      const number = replay.steps
+        .slice(0, frame.index + 1)
+        .filter((candidate) => candidate.kind === "lesson").length;
+      title = `Lesson ${number} · ${step.title}`;
+      body = step.goal ? <Text className="text-text-mid">{step.goal}</Text> : null;
+      break;
+    }
+    case "explain":
+      title = step.path
+        ? `About ${step.path}${step.lines ? `, lines ${step.lines[0]}–${step.lines[1]}` : ""}`
+        : "Explanation";
+      body = <Text className="text-text-mid">{plainText(step.text)}</Text>;
       break;
     case "external": {
       const cause = step.cause

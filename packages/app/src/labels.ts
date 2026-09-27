@@ -25,15 +25,21 @@ export function stepLabel(frame: Frame): string {
     case "command":
       return `$ ${firstLine(step.command, 48)}`;
     case "edit":
-      return `Edit ${fileName(step.path)}`;
+      return `${step.aside ? "Example" : "Edit"} ${fileName(step.path)}`;
     case "write":
-      return `${change?.before === null ? "Create" : "Rewrite"} ${fileName(step.path)}`;
+      if (step.aside) return `Example ${fileName(step.path)}`;
+      // A write that only adds is a file growing, not being rewritten.
+      return `${change?.before === null ? "Create" : change && !change.removed ? "Add to" : "Rewrite"} ${fileName(step.path)}`;
     case "delete":
       return `Delete ${fileName(step.path)}`;
     case "commit":
       return firstLine(step.subject, 60);
     case "external":
       return `${step.content === null ? "Delete" : change?.before === null ? "Create" : "Change"} ${fileName(step.path)}`;
+    case "lesson":
+      return step.title;
+    case "explain":
+      return firstLine(step.text.replace(/^#+\s*/, ""), 60);
   }
 }
 
@@ -55,6 +61,10 @@ export function kindName(step: Step): string {
       return "Commit";
     case "external":
       return "Change by a command";
+    case "lesson":
+      return "Lesson";
+    case "explain":
+      return "Explanation";
   }
 }
 

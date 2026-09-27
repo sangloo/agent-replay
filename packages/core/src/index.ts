@@ -29,7 +29,13 @@ export {
   parseTranscript,
   type Adapter,
 } from "./agents/index.ts";
-export { capture, editBetween, titleOf, type CaptureOptions } from "./capture.ts";
+export {
+  capture,
+  editBetween,
+  titleOf,
+  unstorable,
+  type CaptureOptions,
+} from "./capture.ts";
 export {
   buildHistory,
   GIT_HISTORY,
@@ -37,8 +43,25 @@ export {
   type HistoryCommit,
   type HistoryOptions,
 } from "./history.ts";
-export { importsOf, readingOrder, type SourceFile } from "./order.ts";
-export { applyHunks, countLines, diffHunks, splitLines, type Hunk } from "./diff.ts";
+export { buildOrder, importsOf, readingOrder, type SourceFile } from "./order.ts";
+export {
+  courseProgress,
+  outline,
+  parseRanges,
+  sliceLines,
+  type BuildStatus,
+  type CourseProgress,
+  type FileProgress,
+  type CodeSymbol,
+} from "./course.ts";
+export {
+  applyHunks,
+  countLines,
+  diffHunks,
+  diffLines,
+  splitLines,
+  type Hunk,
+} from "./diff.ts";
 export { causeScore, isLockfile } from "./cause.ts";
 export {
   REPLAY_DIR,
@@ -48,6 +71,9 @@ export {
   type CommandStep,
   type Commit,
   type CommitStep,
+  type CourseTarget,
+  type ExplainStep,
+  type LessonStep,
   type DeleteStep,
   type EditStep,
   type ExternalStep,

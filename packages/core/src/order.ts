@@ -147,3 +147,46 @@ export function readingOrder(files: readonly SourceFile[]): string[] {
   for (const path of sorted) if (!seen.has(path)) visit(path);
   return order;
 }
+
+/**
+ * The order to BUILD files in, rather than read them: what a file uses comes
+ * before it, so nothing is written against code that does not exist yet.
+ * The README and manifests still lead, and tests follow what they test.
+ */
+export function buildOrder(files: readonly SourceFile[]): string[] {
+  const paths = new Set(files.map((file) => file.path));
+  const byPath = new Map(files.map((file) => [file.path, file]));
+  const goModule = /^module\s+(\S+)/m.exec(byPath.get("go.mod")?.content ?? "")?.[1];
+  const top = Math.min(...[...paths].map(depth));
+  const sorted = [...paths].sort(
+    (a, b) => rank(a, top) - rank(b, top) || depth(a) - depth(b) || a.localeCompare(b),
+  );
+  const order: string[] = [];
+  const seen = new Set<string>();
+  // Post-order without recursion: a file is placed once everything it
+  // imports has been.
+  const visit = (start: string) => {
+    const stack: { path: string; expanded: boolean }[] = [
+      { path: start, expanded: false },
+    ];
+    while (stack.length) {
+      const item = stack.pop()!;
+      if (item.expanded) {
+        order.push(item.path);
+        continue;
+      }
+      if (seen.has(item.path)) continue;
+      seen.add(item.path);
+      stack.push({ path: item.path, expanded: true });
+      const file = byPath.get(item.path);
+      if (!file) continue;
+      const imports = importsOf(file, paths, goModule).filter(
+        (p) => !seen.has(p) && !TEST.test(p),
+      );
+      for (const next of imports.reverse()) stack.push({ path: next, expanded: false });
+    }
+  };
+  for (const path of sorted) if (!TEST.test(path)) visit(path);
+  for (const path of sorted) visit(path);
+  return order;
+}

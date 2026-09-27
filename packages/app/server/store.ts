@@ -33,6 +33,8 @@ export interface SavedReplay {
   steps: number;
   changes: number;
   notes: number;
+  /** A course's lessons; absent on anything else. */
+  lessons?: number;
 }
 
 function slug(text: string): string {
@@ -144,6 +146,9 @@ function summarize(root: string, name: string): SavedReplay | undefined {
     steps: replay.steps.length,
     changes: replay.steps.filter(isChange).length,
     notes: Object.keys(replay.notes).length,
+    ...(replay.source === "course"
+      ? { lessons: replay.steps.filter((step) => step.kind === "lesson").length }
+      : {}),
   };
   summaries.set(file, { stamp, saved });
   return saved;

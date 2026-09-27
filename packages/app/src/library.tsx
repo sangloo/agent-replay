@@ -193,7 +193,9 @@ export function Library({
           meta: [
             agentName(item.agent),
             project ? "" : item.repo,
-            `${item.changes} changes`,
+            item.lessons !== undefined
+              ? `${item.lessons} lesson${item.lessons === 1 ? "" : "s"}`
+              : `${item.changes} changes`,
           ]
             .filter(Boolean)
             .join(" · "),
@@ -317,7 +319,7 @@ export function Library({
         <p className="-mt-2 px-3 text-xs text-text-low">
           {tab === "sessions"
             ? "Agent sessions on this machine — Claude Code, Codex and Gemini CLI. Each is read live when you open it."
-            : "Replays saved into a repository’s .replays/ folder — with their notes, ready to share."}
+            : "Replays and courses saved into a repository’s .replays/ folder — with their notes, ready to share."}
         </p>
         <div
           className={cn(

@@ -1,7 +1,7 @@
 {
   "name": "replay",
   "displayName": "Replay",
-  "description": "Capture every session as a replay a reviewer can play back change by change, with notes on the steps that need a careful look.",
+  "description": "Replay what a coding agent did, change by change: capture sessions with notes, review them against the evidence, and learn a repository through a course that rebuilds it from nothing.",
   "version": "0.1.0",
   "license": "MIT",
   "homepage": "https://github.com/sangloo/agent-replay",
