@@ -6,7 +6,7 @@ the commit it started on to the state it left. Claude Code, Codex and Gemini
 CLI sessions, read from the logs they already write, in any git repository.
 
 ```bash
-npx agent-replay-studio    # open the player → http://localhost:5180
+npx agent-replay-studio@latest    # open the player → http://localhost:5180
 ```
 
 Or keep the `replay` command:

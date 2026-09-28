@@ -10,7 +10,7 @@ which change came first, what the agent believed when it made it, what it ran
 to check, and whether those checks actually held.
 
 ```bash
-npx agent-replay-studio
+npx agent-replay-studio@latest
 ```
 
 That opens the player on the sessions already on your machine. Nothing to
@@ -62,7 +62,7 @@ record and nothing to configure: it reads the logs your agents already write.
 Needs **Node 20+** and **git**.
 
 ```bash
-npx agent-replay-studio          # try it — the player at http://localhost:5180
+npx agent-replay-studio@latest          # try it — the player at http://localhost:5180
 
 npm install -g agent-replay-studio # or keep the `replay` command
 replay                          # the player
@@ -381,3 +381,20 @@ and **Inspect source** switch between reading and code. Full-file imports marked
 **Included for completeness** collapse in the reading flow, while the exact source
 remains inspectable. Source references open a focused preview and return to the
 explanation without replacing the saved study position.
+
+## Automatic npm releases
+
+Every push to `main` runs verification. If the version in
+`packages/app/publish.json` is not on npm, `.github/workflows/release.yml`
+builds and publishes it. Already-published versions are skipped; bump that
+manifest before pushing a new release. npm versions cannot be overwritten.
+Manual retries use the Release workflow's **Run workflow** button on `main`.
+
+One-time setup: in npm's `agent-replay-studio` package settings, add a
+**Trusted Publisher → GitHub Actions** with user **sangloo**, repository
+**agent-replay**, and workflow filename **release.yml**. Leave environment
+blank and allow direct publishing if that option is shown. No `NPM_TOKEN`
+or other repository secret is needed. The workflow uses GitHub OIDC and
+publishes provenance after verification succeeds.
+
+See https://docs.npmjs.com/trusted-publishers/ for the npm setup.
