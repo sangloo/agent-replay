@@ -23,10 +23,13 @@ import {
   isChange,
   play,
   readNotes,
+  curriculumLessons,
+  type StudyContext,
   type Replay,
 } from "@agent-replay/core";
 
 import { captureSession } from "./capture.ts";
+import { readCurriculumFile } from "./curriculum.ts";
 import * as git from "./git.ts";
 import {
   currentSessionId,
@@ -53,7 +56,7 @@ import {
   write,
   type Course,
 } from "./course.ts";
-import { exportHtml, hasPlayer, playerDist } from "./export.ts";
+import { exportHtml, exportCurriculumHtml, hasPlayer, playerDist } from "./export.ts";
 import { captureHistory } from "./history.ts";
 import { readPayload, runHook } from "./hook.ts";
 import { serve } from "./serve.ts";
@@ -81,6 +84,9 @@ Works with Claude Code, Codex and Gemini CLI sessions, in any git repository.
   replay explain <replay.json> [--model <id>] a small model's notes: per commit or turn,
                                               and a tour where many files arrive at once
   replay export [<replay.json>] [options]     one HTML file that plays the replay
+    --curriculum <manifest>                  add companion lesson navigation
+    --library --curriculum <manifest>        export the full course map
+    --export-base <folder/>                  relative lesson folder for a library
                                               anywhere, offline — attach it to a PR
     --session <id|log file>                   a session instead of a saved replay
     -o, --out <file.html>                     default: <title>.html here
@@ -109,7 +115,8 @@ prints where it stands; open it in the player at any moment to see it play.
   explain [--file <path>] [--lines a-b] ["<markdown>" | -]
                               teaching text (Markdown, $math$), about code when --file;
                               --lines are the real file's (as outline and take count)
-  take <path> [--lines 1-20,45-80] [--why "<text>"] [--drop]
+  take <path> [--lines 1-20,45-80] [--why "<text>"] [--drop] [--included]
+                              --included imports a full exact file for completeness
                               the next piece of a real file: those lines of it at the
                               target — or all of it — exactly as they are there; it
                               refuses to take away lines already built unless --drop
@@ -226,6 +233,8 @@ function runCourse(args: string[]): void {
       why: { type: "string" },
       all: { type: "boolean" },
       drop: { type: "boolean" },
+      included: { type: "boolean" },
+      "max-file-bytes": { type: "string" },
       last: { type: "string" },
     },
   });
@@ -248,6 +257,10 @@ function runCourse(args: string[]): void {
       title: values.title,
       rev: values.to,
       paths: values.path?.map(repoPath),
+      maxFileBytes:
+        values["max-file-bytes"] === undefined
+          ? undefined
+          : Number(values["max-file-bytes"]),
     });
     const target = courseTarget(course);
     const order = [...target.files.entries()];
@@ -380,6 +393,7 @@ function runCourse(args: string[]): void {
         fail("usage: replay course take <path> [--lines 1-20,45-80] [--why <text>]");
       course = take(course, target, repoPath(path), ranges, values.why, {
         drop: values.drop,
+        included: values.included,
       });
       break;
     }
@@ -590,7 +604,7 @@ function printSteps(replay: Replay): void {
   }
 }
 
-// No command opens the player: `npx agentreplay` should show something.
+// No command opens the player: `npx agent-replay-studio` should show something.
 const [given = "open", ...rest] = process.argv.slice(2);
 // `replay <command> --help` is the usage, like `replay help`.
 const command =
@@ -740,9 +754,25 @@ switch (command) {
         session: { type: "string" },
         repo: { type: "string" },
         out: { type: "string", short: "o" },
+        curriculum: { type: "string" },
+        library: { type: "boolean" },
+        "export-base": { type: "string" },
       },
     });
     const [path] = positionals;
+    if (values.library) {
+      if (!values.curriculum) fail("--library requires --curriculum <manifest>.");
+      const curriculum = readCurriculumFile(resolve(here, values.curriculum!));
+      const dist = playerDist();
+      if (!hasPlayer(dist)) buildPlayer();
+      const out = resolve(here, values.out ?? "index.html");
+      writeFileSync(
+        out,
+        exportCurriculumHtml(curriculum, values["export-base"] ?? "", dist),
+      );
+      print(`Exported course library → ${out}`);
+      break;
+    }
     let replay: Replay;
     if (path) {
       replay = load(path).replay;
@@ -764,7 +794,21 @@ switch (command) {
     // Beside you, not in .replays/: an export is a copy to hand out, not
     // something to commit with the replay.
     const out = resolve(here, values.out ?? `${slug}.html`);
-    writeFileSync(out, exportHtml(replay, dist));
+    let study: StudyContext | undefined;
+    if (values.curriculum) {
+      if (!path) fail("--curriculum requires a saved replay file.");
+      const curriculum = readCurriculumFile(resolve(here, values.curriculum));
+      const name = resolve(here, path!)
+        .split(/[\\/]/)
+        .at(-1)!
+        .replace(/\.json$/, "");
+      const lesson = curriculumLessons(curriculum).find((item) => item.replay === name);
+      if (!lesson) fail("This replay is not in the curriculum.");
+      if (lesson!.exportFile && out.split(/[\\/]/).at(-1) !== lesson!.exportFile)
+        fail(`Export this lesson as ${lesson!.exportFile} so companion links work.`);
+      study = { curriculum, lessonId: lesson!.id };
+    }
+    writeFileSync(out, exportHtml(replay, dist, study));
     print(`Exported "${replay.title}" → ${relative(here, out) || out}`);
     break;
   }

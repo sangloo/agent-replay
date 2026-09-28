@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { capture, type CaptureOptions } from "./capture.ts";
+import { capture, editBetween, type CaptureOptions } from "./capture.ts";
 import type { ExternalStep, Replay } from "./format.ts";
 import { annotate, readNotes } from "./notes.ts";
 import { play } from "./play.ts";
@@ -30,6 +30,16 @@ function run(lines: string[], options: Partial<CaptureOptions> = {}): Replay {
 const GREET = 'export const greet = (name: string) => "hi " + name;\n';
 
 beforeEach(resetClock);
+
+describe("editBetween", () => {
+  it("reconstructs a complete file from an excerpt beginning with a newline", () => {
+    const before = "\nbody\n";
+    const after = "header\n\nbody\nend\n";
+    const change = editBetween(before, after);
+    expect(change).toBeDefined();
+    expect(before.replace(change!.oldString, change!.newString)).toBe(after);
+  });
+});
 
 describe("capture", () => {
   it("turns prompts, changes and commands into steps with their narration", () => {

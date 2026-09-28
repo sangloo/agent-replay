@@ -16,7 +16,7 @@ The tool guarantees the code is real: every piece comes from the target
 revision with `take`, so you never retype code (and never misremember it).
 Your job is the teaching: the order, the explanations, the examples.
 
-The command is `replay …` when installed, or `npx -y agentreplay …` without
+The command is `replay …` when installed, or `npx -y agent-replay-studio …` without
 installing — use whichever works here. `replay course help` lists everything.
 
 ## 0. Understand before you teach

@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes the `agentreplay` npm package (see packages/app/scripts/package.mjs)
+# Publishes `agent-replay-studio` (see packages/app/scripts/package.mjs)
 # and attaches the tarball to a GitHub release. Runs when a `v*` tag is pushed:
 # bump the version in packages/app/publish.json, tag `v<version>`, push the tag.
 # Needs an `NPM_TOKEN` repository secret with publish rights to the package.

@@ -1,7 +1,7 @@
 import { play, type Replay } from "@agent-replay/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Engine, stepSeconds, type Snapshot } from "./use-playback";
+import { Engine, isTyped, stepSeconds, type Snapshot } from "./use-playback";
 
 const replay: Replay = {
   version: 1,
@@ -41,6 +41,23 @@ const replay: Replay = {
 };
 
 describe("the playback clock", () => {
+  it("imports completeness material without a long typing animation", () => {
+    const full: Replay = {
+      ...replay,
+      steps: [
+        {
+          ...replay.steps[0]!,
+          kind: "write",
+          path: "a.ts",
+          content: "reference\n".repeat(1000),
+          sourceMode: "included",
+        },
+      ],
+    };
+    const frame = play(full).frames[0];
+    expect(isTyped(frame)).toBe(false);
+    expect(stepSeconds(frame)).toBe(1);
+  });
   beforeEach(() => {
     vi.useFakeTimers({
       toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"],

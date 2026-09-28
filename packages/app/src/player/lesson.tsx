@@ -13,6 +13,7 @@ export interface LessonPanelProps {
   /** Steps applied; the current step is `cursor - 1`. */
   cursor: number;
   onJump: (cursor: number) => void;
+  onInspect?: (cursor: number) => void;
 }
 
 interface Lesson {
@@ -43,6 +44,8 @@ function lessonsOf(frames: readonly Frame[]): Lesson[] {
 function codeLabel(frame: Frame): string | undefined {
   const { step, change } = frame;
   if (!change) return undefined;
+  if ((step.kind === "write" || step.kind === "edit") && step.sourceMode === "included")
+    return `Included for completeness · ${step.path}`;
   if ((step.kind === "write" || step.kind === "edit") && step.aside) {
     return `Example · ${step.path}`;
   }
@@ -63,6 +66,7 @@ export const LessonPanel = React.memo(function LessonPanel({
   frames,
   cursor,
   onJump,
+  onInspect = onJump,
 }: LessonPanelProps) {
   const lessons = React.useMemo(() => lessonsOf(frames), [frames]);
   const currentIndex = cursor - 1;
@@ -78,7 +82,12 @@ export const LessonPanel = React.memo(function LessonPanel({
 
   const latest = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
-    latest.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    latest.current?.scrollIntoView({
+      block: "nearest",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
   }, [cursor]);
 
   if (!lesson) {
@@ -86,6 +95,17 @@ export const LessonPanel = React.memo(function LessonPanel({
   }
   const shown = lesson.frames.filter((frame) => frame.index <= currentIndex);
   const started = lesson.frame ? lesson.frame.index <= currentIndex : shown.length > 0;
+  const explanations = frames.filter(
+    (f) =>
+      f.step.kind === "explain" &&
+      !(
+        frames[f.index - 1]?.step &&
+        "sourceMode" in frames[f.index - 1]!.step &&
+        (frames[f.index - 1]!.step as { sourceMode?: string }).sourceMode === "included"
+      ),
+  );
+  const previous = explanations.filter((f) => f.index < currentIndex).at(-1);
+  const next = explanations.find((f) => f.index > currentIndex);
   const title = lesson.frame?.step.kind === "lesson" ? lesson.frame.step : undefined;
 
   return (
@@ -139,6 +159,27 @@ export const LessonPanel = React.memo(function LessonPanel({
         ) : null}
       </div>
 
+      <nav
+        aria-label="Explanation navigation"
+        className="flex justify-between gap-3 border-b border-line px-5 py-2 text-xs text-text-mid"
+      >
+        <button
+          type="button"
+          disabled={!previous}
+          onClick={() => previous && onJump(previous.index + 1)}
+          className="rounded-control focus-bar disabled:opacity-40"
+        >
+          ← Previous explanation
+        </button>
+        <button
+          type="button"
+          disabled={!next}
+          onClick={() => next && onJump(next.index + 1)}
+          className="rounded-control focus-bar disabled:opacity-40"
+        >
+          Next explanation →
+        </button>
+      </nav>
       <article className="flex flex-col gap-4 px-5 pt-4 pb-10">
         <header className="flex flex-col gap-1">
           <h2
@@ -163,6 +204,48 @@ export const LessonPanel = React.memo(function LessonPanel({
         {shown.map((frame) => {
           const isLatest = frame.index === currentIndex;
           const { step } = frame;
+          const before = frames[frame.index - 1]?.step;
+          if (
+            step.kind === "explain" &&
+            before &&
+            "sourceMode" in before &&
+            before.sourceMode === "included"
+          )
+            return null;
+          if (
+            (step.kind === "write" || step.kind === "edit") &&
+            step.sourceMode === "included"
+          ) {
+            const explanation = frames[frame.index + 1];
+            return (
+              <details
+                key={frame.index}
+                className="rounded-control border border-line p-3 text-xs text-text-mid"
+              >
+                <summary className="cursor-pointer leading-relaxed">
+                  Included for completeness · {fileName(step.path)}
+                </summary>
+                <p className="my-2 font-mono text-2xs break-all">{step.path}</p>
+                <button
+                  type="button"
+                  className="mb-3 underline focus-bar"
+                  onClick={() => onInspect(frame.index + 1)}
+                >
+                  Inspect complete file
+                </button>
+                {explanation &&
+                explanation.index <= currentIndex &&
+                explanation.step.kind === "explain" ? (
+                  <Markdown text={explanation.step.text} />
+                ) : (
+                  <p>
+                    Exact reference source. Only explicitly highlighted ranges count as
+                    explained.
+                  </p>
+                )}
+              </details>
+            );
+          }
           if (step.kind === "explain") {
             return (
               <div
@@ -178,7 +261,7 @@ export const LessonPanel = React.memo(function LessonPanel({
                 {step.path ? (
                   <button
                     type="button"
-                    onClick={() => onJump(frame.index + 1)}
+                    onClick={() => onInspect(frame.index + 1)}
                     className="mb-1 rounded-control font-mono text-2xs text-text-low focus-bar hover:text-text-high"
                   >
                     {step.path}
@@ -201,7 +284,7 @@ export const LessonPanel = React.memo(function LessonPanel({
             >
               <button
                 type="button"
-                onClick={() => onJump(frame.index + 1)}
+                onClick={() => onInspect(frame.index + 1)}
                 className={cn(
                   "-mx-1.5 flex items-center gap-2 self-start rounded-control px-1.5 py-0.5 text-xs focus-bar hover:bg-hover",
                   isLatest ? "text-text-high" : "text-text-low",

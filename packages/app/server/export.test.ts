@@ -48,3 +48,50 @@ describe("exportHtml", () => {
     expect(JSON.parse(data!)).toEqual(replay);
   });
 });
+
+it("embeds a companion course map and lesson navigation without server dependencies", async () => {
+  const { parseCurriculum } = await import("@agent-replay/core");
+  const { exportCurriculumHtml } = await import("./export.ts");
+  const curriculum = parseCurriculum({
+    version: 1,
+    id: "course",
+    revision: "edition-two",
+    title: "Read </script> safely",
+    description: "A shared course",
+    libraryFile: "index.html",
+    chapters: [
+      {
+        id: "start",
+        title: "Start",
+        description: "One lesson",
+        lessons: [
+          {
+            id: "01",
+            title: "One",
+            goal: "Learn",
+            replay: "one",
+            prerequisites: [],
+            exportFile: "one.html",
+          },
+        ],
+      },
+    ],
+  });
+  const dist = fakeDist();
+  const library = exportCurriculumHtml(curriculum, "exports/published/", dist);
+  expect(library).not.toMatch(/src="\/assets|href="\/assets|url\(\/assets/);
+  const data = library.match(/id="curriculum-library">(.*?)<\/script>/)?.[1];
+  expect(JSON.parse(data!)).toEqual({ curriculum, exportBase: "exports/published/" });
+  expect(library.match(/<\/script>/g)).toHaveLength(2);
+  for (const unsafe of ["../", "https://host/", "/absolute/", "folder\\path/"])
+    expect(() => exportCurriculumHtml(curriculum, unsafe, dist)).toThrow();
+  const lesson = exportHtml({ title: "One" } as Replay, dist, {
+    curriculum,
+    lessonId: "01",
+    key: "local-root-private",
+    unavailable: ["01"],
+  });
+  const context = JSON.parse(lesson.match(/id="curriculum-data">(.*?)<\/script>/)![1]!);
+  expect(context).toEqual({ curriculum, lessonId: "01" });
+  expect(lesson).not.toContain("local-root-private");
+});

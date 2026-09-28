@@ -5,7 +5,7 @@
  * long is abandoned with a message that says so, rather than spinning.
  */
 
-import type { Replay } from "@agent-replay/core";
+import type { Replay, StudyCatalog } from "@agent-replay/core";
 import * as React from "react";
 
 import type {
@@ -115,6 +115,7 @@ const sourcePath = ({ kind, id }: ReplaySource) =>
   `/api/${kind}/${encodeURIComponent(id)}`;
 
 export const api = {
+  curricula: () => call<StudyCatalog>("GET", "/api/curricula"),
   projects: () => call<Project[]>("GET", "/api/projects"),
   addProject: (path: string) => call<Project>("POST", "/api/projects", { path }),
   forgetProject: (root: string) =>

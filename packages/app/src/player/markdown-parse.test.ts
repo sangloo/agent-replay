@@ -63,6 +63,18 @@ describe("parseBlocks", () => {
 });
 
 describe("plainText", () => {
+  it("keeps captions readable without revealing collapsed worked answers", () => {
+    expect(
+      plainText(
+        "> [!NOTE] Evidence\n> Read the source.\n\n:::details Worked answer\nA bounded result.\n:::",
+      ),
+    ).toBe("Evidence Read the source. Worked answer");
+    expect(
+      plainText(
+        "Before\n\n:::details First\nHidden one\n:::\n\nBetween\n\n:::details Second\nHidden two\n:::\n\nAfter",
+      ),
+    ).toBe("Before First Between Second After");
+  });
   it("drops the markup, keeps the words", () => {
     expect(plainText("## Why **this** [works](https://x)\n\n`code`")).toBe(
       "Why this works code",

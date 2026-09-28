@@ -11,11 +11,15 @@
  * clearly marked teaching material (`example`).
  */
 
+import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import {
   buildOrder,
+  validSourceRanges,
+  mapSourceRange,
+  type SourceRange,
   courseProgress,
   diffLines,
   editBetween,
@@ -56,7 +60,20 @@ function inScope(path: string, paths: readonly string[] | undefined): boolean {
 }
 
 /** The files a course over `rev` (and `paths`) must arrive at. */
-export function targetOf(root: string, rev: string, paths?: readonly string[]): Target {
+export function targetOf(
+  root: string,
+  rev: string,
+  paths?: readonly string[],
+  maxFileBytes = MAX_BYTES,
+): Target {
+  if (
+    !Number.isSafeInteger(maxFileBytes) ||
+    maxFileBytes < MAX_BYTES ||
+    maxFileBytes > 2 * 1024 * 1024
+  )
+    throw new Error(
+      "Course file limit must be an integer between 524288 and 2097152 bytes.",
+    );
   const all = git
     .filesAt(root, rev)
     .filter((path) => inScope(path, paths) && !path.startsWith(`${REPLAY_DIR}/`));
@@ -68,7 +85,7 @@ export function targetOf(root: string, rev: string, paths?: readonly string[]): 
   const skipped: string[] = [];
   for (const path of all) {
     const content = blobs.get(`${rev}:${path}`) ?? null;
-    if (content === null || unstorable(path, content, MAX_BYTES, isLockfile)) {
+    if (content === null || unstorable(path, content, maxFileBytes, isLockfile)) {
       skipped.push(path);
     } else kept.push({ path, content });
   }
@@ -98,7 +115,7 @@ function stepId(kind: string): string {
 
 export function startCourse(
   root: string,
-  options: { title: string; rev?: string; paths?: string[] },
+  options: { title: string; rev?: string; paths?: string[]; maxFileBytes?: number },
 ): Course {
   const rev = git.resolve(root, options.rev ?? "HEAD");
   if (!rev) throw new Error(`Unknown revision ${options.rev ?? "HEAD"}.`);
@@ -120,7 +137,24 @@ export function startCourse(
     omitted: [],
     steps: [],
     notes: {},
-    course: { rev, ...(options.paths?.length ? { paths: options.paths } : {}) },
+    course: {
+      rev,
+      ...(options.maxFileBytes === undefined
+        ? {}
+        : { maxFileBytes: options.maxFileBytes }),
+      ...(options.paths?.length ? { paths: options.paths } : {}),
+      sources: Object.fromEntries(
+        [...targetOf(root, rev, options.paths, options.maxFileBytes).files].map(
+          ([path, content]) => [
+            path,
+            {
+              lineCount: splitLines(content).length,
+              sha256: createHash("sha256").update(content).digest("hex"),
+            },
+          ],
+        ),
+      ),
+    },
   };
   const file = saveReplay(root, replay);
   return { root, name: nameOf(file), file, replay };
@@ -266,8 +300,33 @@ export function addExplain(
     const final = target.files.get(about.path);
     // A real file's lines are counted as in the target — the numbers
     // `outline` shows and `take` uses; an example's, as it stands.
-    if (lines && final !== undefined) lines = mapLines(content, final, lines);
-    else if (lines) {
+    if (lines && final !== undefined) {
+      const previous = course.replay.steps.findLast(
+        (step) =>
+          "path" in step &&
+          step.path === about.path &&
+          (step.kind === "write" ||
+            step.kind === "edit" ||
+            step.kind === "external" ||
+            step.kind === "delete"),
+      );
+      if (
+        previous &&
+        (previous.kind === "write" || previous.kind === "edit") &&
+        validSourceRanges(
+          previous.sourceLines,
+          splitLines(final).length,
+          splitLines(content).length,
+        )
+      ) {
+        const mapped = mapSourceRange(previous.sourceLines, lines);
+        if (!mapped)
+          throw new Error(
+            "Original source lines are not in the file yet — take them first",
+          );
+        lines = mapped;
+      } else lines = mapLines(content, final, lines);
+    } else if (lines) {
       const count = content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
       if (lines[1] > count)
         throw new Error(
@@ -290,7 +349,12 @@ function change(
   course: Course,
   path: string,
   after: string,
-  meta: { why?: string; aside?: boolean },
+  meta: {
+    why?: string;
+    aside?: boolean;
+    sourceLines?: SourceRange[];
+    sourceMode?: "included";
+  },
 ): Course {
   const before = current(course, path);
   if (before === after)
@@ -299,6 +363,8 @@ function change(
   const common = {
     ...base(course, edit ? "edit" : "write", meta.why),
     path,
+    ...(meta.sourceLines ? { sourceLines: meta.sourceLines } : {}),
+    ...(meta.sourceMode ? { sourceMode: meta.sourceMode } : {}),
     ...(meta.aside ? { aside: true as const } : {}),
   };
   const step: Step = edit
@@ -318,13 +384,13 @@ export function take(
   path: string,
   ranges?: [number, number][],
   why?: string,
-  options: { drop?: boolean } = {},
+  options: { drop?: boolean; included?: boolean } = {},
 ): Course {
   const content = target.files.get(path);
   if (content === undefined) {
     throw new Error(
       target.skipped.includes(path)
-        ? `${path} is left out of courses (a lockfile, binary or over 512 KB).`
+        ? `${path} is left out of this course (a lockfile, binary or above its file-size limit).`
         : `${path} is not in the course's target — see \`replay course status\`.`,
     );
   }
@@ -335,20 +401,67 @@ export function take(
       `${path} has ${total} lines; --lines ${past[0]}-${past[1]} goes past its end.`,
     );
   }
+  const selected: SourceRange[] = [];
+  for (const [start, end] of [...(ranges ?? ([[1, total]] as SourceRange[]))].sort(
+    (a, b) => a[0] - b[0],
+  )) {
+    const previous = selected.at(-1);
+    if (previous && start <= previous[1] + 1) previous[1] = Math.max(previous[1], end);
+    else selected.push([start, end]);
+  }
   const after = ranges ? sliceLines(content, ranges) : content;
+  if (options.included && after !== content)
+    throw new Error(
+      "An included-for-completeness import must contain the exact full file.",
+    );
   // Taking a narrower range than before would take code away from the
   // learner, which is almost never what the author meant.
   const before = current(course, path);
+  const previous = course.replay.steps.findLast(
+    (step) =>
+      "path" in step &&
+      step.path === path &&
+      (step.kind === "write" ||
+        step.kind === "edit" ||
+        step.kind === "external" ||
+        step.kind === "delete"),
+  );
+  const previousRanges =
+    previous &&
+    (previous.kind === "write" || previous.kind === "edit") &&
+    !previous.aside &&
+    before !== null &&
+    validSourceRanges(previous.sourceLines, total, splitLines(before).length)
+      ? previous.sourceLines
+      : undefined;
   if (before !== null && !options.drop) {
     const kept = (text: string) => builtLines(text, content);
-    const lost = [...kept(before)].filter((line) => !kept(after).has(line));
+    const exact = (rs: SourceRange[]) =>
+      new Set(
+        rs.flatMap(([a, b]) => Array.from({ length: b - a + 1 }, (_, i) => a + i)),
+      );
+    const nextLines = previousRanges ? exact(selected) : kept(after);
+    const lost = [...(previousRanges ? exact(previousRanges) : kept(before))].filter(
+      (line) => !nextLines.has(line),
+    );
     if (lost.length) {
       throw new Error(
         `this would remove ${lost.length} line${lost.length === 1 ? "" : "s"} the learner has already seen (${rangesText(lost)}); widen --lines to keep them, or pass --drop to remove them on purpose.`,
       );
     }
   }
-  return change(course, path, after, { why });
+  if (course.replay.course) {
+    course.replay.course.sources ??= {};
+    course.replay.course.sources[path] = {
+      lineCount: total,
+      sha256: createHash("sha256").update(content).digest("hex"),
+    };
+  }
+  return change(course, path, after, {
+    why,
+    sourceLines: selected,
+    ...(options.included ? { sourceMode: "included" as const } : {}),
+  });
 }
 
 /** Which lines of `target` (by number) `built` already holds, in order. */
@@ -523,5 +636,5 @@ export function progressOf(course: Course, target: Target): CourseProgress {
 export function courseTarget(course: Course): Target {
   const target = course.replay.course;
   if (!target) throw new Error("Not a course.");
-  return targetOf(course.root, target.rev, target.paths);
+  return targetOf(course.root, target.rev, target.paths, target.maxFileBytes);
 }

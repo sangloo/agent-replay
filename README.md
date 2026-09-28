@@ -10,7 +10,7 @@ which change came first, what the agent believed when it made it, what it ran
 to check, and whether those checks actually held.
 
 ```bash
-npx agentreplay
+npx agent-replay-studio
 ```
 
 That opens the player on the sessions already on your machine. Nothing to
@@ -62,9 +62,9 @@ record and nothing to configure: it reads the logs your agents already write.
 Needs **Node 20+** and **git**.
 
 ```bash
-npx agentreplay                 # try it — the player at http://localhost:5180
+npx agent-replay-studio          # try it — the player at http://localhost:5180
 
-npm install -g agentreplay      # or keep the `replay` command
+npm install -g agent-replay-studio # or keep the `replay` command
 replay                          # the player
 replay setup                    # capture automatically after every agent turn
 ```
@@ -288,3 +288,96 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Adding an agent is one adapter file in
 ## License
 
 [MIT](LICENSE)
+
+### Local teaching extensions
+
+Explanations accept tables, fenced code, math, typed callouts such as
+`> [!CHECKPOINT] Predict the outcome`, and collapsible blocks:
+
+```text
+:::details Worked example
+The explanation appears here.
+:::
+```
+
+A function label can link to exact pinned source:
+`[Validate](source:internal/audit/audit.go#L92-L106)`.
+The player previews up to twelve lines and opens a recorded snapshot containing
+that whole span. **Return to explanation** restores the starting position.
+Original and replay line numbers are shown separately. Omitted spans are disabled;
+there is no hidden repository fetch or symbol-name guessing. New `course take`
+steps store exact original ranges and source-file hashes. Older courses remain
+readable; references without this optional mapping stay unavailable.
+
+Callouts and details use structured Markdown, never executable HTML. Session
+progress measures playback. The source counter measures included lines in this
+course's selected target files, not coverage of an entire repository.
+
+`replay course take path/to/file --included --why "Repetitive implementation"`
+imports the exact full source file for completeness. It is labeled in the player
+and arrives without a typing animation. Explain substantive excerpts first, then
+include the rest; the source counter preserves those earlier explained lines and
+counts only the remaining lines as included. Neither counter measures conceptual
+completion. Partial files cannot be labeled as full-file imports.
+For an indivisible large migration, `course start --max-file-bytes 1048576`
+explicitly raises the course limit from 512 KiB to 1 MiB. This persisted setting is
+bounded at 2 MiB; binary and lockfile exclusions still apply.
+
+### Connected lessons
+
+A course can carry an optional `.replays/curriculum.manifest` alongside its saved
+replays. **Learn / Chapters** shows the ordered chapters, prerequisites, a suggested
+next lesson and the last saved study position. **Mark reviewed** is an explicit
+reader checkpoint; playing a lesson does not mark it complete. Progress stays in
+this browser and is isolated by curriculum ID and revision. Existing replays need
+no migration.
+
+```json
+{
+  "version": 1,
+  "id": "example-course",
+  "revision": "edition-1",
+  "title": "Understand the application",
+  "description": "Follow one request from input to persistence.",
+  "libraryFile": "index.html",
+  "chapters": [
+    {
+      "id": "foundation",
+      "title": "Start with the boundary",
+      "description": "Read the input contract before the implementation.",
+      "lessons": [
+        {
+          "id": "01",
+          "title": "A request enters",
+          "goal": "Find the request boundary.",
+          "replay": "saved-course-basename",
+          "prerequisites": [],
+          "exportFile": "session-01.html"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Replay names are basenames without `.json`. Prerequisites must name earlier lessons.
+Use `referenceOnly: true` for a reference collection. Missing saved replays remain
+visible as unavailable; invalid maps are reported without breaking the replay list.
+`libraryFile` and each `exportFile` are distinct HTML basenames.
+
+```sh
+replay export .replays/saved-course-basename.json --curriculum .replays/curriculum.manifest -o session-01.html
+replay export --library --curriculum .replays/curriculum.manifest -o index.html
+```
+
+Keep companion exports together for chapter and next/previous links. A library in a
+parent folder can use `--export-base lessons/`; also place a library beside the
+lessons if they name `index.html` as their return link. Each file contains its player,
+fonts and data for offline use. Browser storage policies can limit persistence when
+opening files directly; a local server gives the files one consistent origin.
+
+Course reading starts with the explanation panel. On narrow screens, **Read lesson**
+and **Inspect source** switch between reading and code. Full-file imports marked
+**Included for completeness** collapse in the reading flow, while the exact source
+remains inspectable. Source references open a focused preview and return to the
+explanation without replacing the saved study position.

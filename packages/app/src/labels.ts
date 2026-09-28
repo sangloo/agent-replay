@@ -17,6 +17,8 @@ export function firstLine(text: string, max = 60): string {
 /** What a step is, in a few words — the scrubber's card and the panel's title. */
 export function stepLabel(frame: Frame): string {
   const { step, change } = frame;
+  if ((step.kind === "write" || step.kind === "edit") && step.sourceMode === "included")
+    return `Included for completeness · ${fileName(step.path)}`;
   switch (step.kind) {
     case "prompt":
       return step.agent === "main" ? "Prompt" : "Task for a subagent";

@@ -4,10 +4,23 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createHandler } from "./api.ts";
+import { findSession } from "./sessions.ts";
 import { isLocalHost, serve } from "./serve.ts";
+
+// HTTP behavior must not depend on how many transcripts or projects happen
+// to be present in the developer's home directory.
+vi.mock(import("./sessions.ts"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  listSessions: () => [],
+  findSession: vi.fn(() => undefined),
+}));
+vi.mock(import("./projects.ts"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  readAdded: () => [],
+}));
 
 describe("isLocalHost", () => {
   it("answers localhost on our port only", () => {
@@ -78,6 +91,9 @@ describe("the API handler", () => {
 
   it("looks sessions up by exact id, never by file path", async () => {
     expect(await call(port, "/api/sessions/package.json")).toBe(404);
+    expect(findSession).toHaveBeenCalledWith("package.json", undefined, {
+      exact: true,
+    });
   });
 });
 

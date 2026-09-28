@@ -96,7 +96,7 @@ export function editBetween(
   const first = hunks[0];
   const last = hunks.at(-1);
   if (!first || !last) return undefined;
-  const start = before.lastIndexOf("\n", first.at - 1) + 1;
+  const start = first.at === 0 ? 0 : before.lastIndexOf("\n", first.at - 1) + 1;
   const stop = before.indexOf("\n", last.at + last.remove.length);
   const end = stop < 0 ? before.length : stop + 1;
   const oldString = before.slice(start, end);

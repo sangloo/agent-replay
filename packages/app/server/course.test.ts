@@ -68,6 +68,64 @@ beforeAll(() => {
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
 describe("a course", () => {
+  it("requires a bounded explicit size opt-in and still excludes binary files", () => {
+    const largeRepo = join(temp, "large");
+    mkdirSync(largeRepo);
+    execFileSync("git", ["init", "-q", "-b", "main", largeRepo]);
+    const sql = "-- exact migration source\n".repeat(24000);
+    writeFileSync(join(largeRepo, "migration.sql"), sql);
+    writeFileSync(join(largeRepo, "binary.bin"), "binary\0contents");
+    execFileSync("git", ["-C", largeRepo, "add", "."]);
+    execFileSync("git", [
+      "-C",
+      largeRepo,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-qm",
+      "source",
+    ]);
+    expect(
+      courseTarget(startCourse(largeRepo, { title: "Default" })).skipped,
+    ).toContain("migration.sql");
+    const course = startCourse(largeRepo, {
+      title: "Large reference",
+      maxFileBytes: 1024 * 1024,
+    });
+    expect(
+      courseTarget(loadCourse(largeRepo, course.name)).files.get("migration.sql"),
+    ).toBe(sql);
+    expect(courseTarget(course).skipped).toContain("binary.bin");
+    for (const limit of [0, NaN, Infinity, 2097153])
+      expect(() =>
+        startCourse(largeRepo, { title: "Invalid", maxFileBytes: limit }),
+      ).toThrow(/file limit/);
+  });
+  it("labels only exact full-file takes as included for completeness", () => {
+    let course = startCourse(repo, { title: "Full source reference" });
+    const target = courseTarget(course);
+    expect(() =>
+      take(course, target, "src/vec.ts", [[1, 4]], "Partial", { included: true }),
+    ).toThrow(/exact full file/);
+    course = take(course, target, "src/vec.ts", [[1, 4]]);
+    course = take(
+      course,
+      target,
+      "src/vec.ts",
+      undefined,
+      "Repetitive implementation",
+      { included: true },
+    );
+    expect(course.replay.steps.at(-1)).toMatchObject({
+      sourceMode: "included",
+      sourceLines: [[1, 12]],
+    });
+    expect(
+      play(course.replay).contentAt("src/vec.ts", course.replay.steps.length),
+    ).toBe(VEC);
+  });
   it("builds the target in build order, a piece at a time, and knows when it is done", () => {
     let course = startCourse(repo, { title: "Learn vec" });
     const target = courseTarget(course);
@@ -174,4 +232,34 @@ describe("mapLines", () => {
     expect(mapLines("b {\n}\n", target, [3, 4])).toEqual([1, 2]);
     expect(() => mapLines("a {\n}\n", target, [3, 3])).toThrow(/take them first/);
   });
+});
+
+it("records exact source coordinates across repeated braces and unsorted overlapping takes", () => {
+  let course = startCourse(repo, { title: "Source references" });
+  const target = courseTarget(course);
+  course = take(course, target, "src/vec.ts", [[10, 12]]);
+  course = take(course, target, "src/vec.ts", [
+    [10, 12],
+    [1, 4],
+    [3, 4],
+  ]);
+  expect(course.replay.steps.at(-1)).toMatchObject({
+    sourceLines: [
+      [1, 4],
+      [10, 12],
+    ],
+  });
+  expect(course.replay.course?.sources?.["src/vec.ts"]).toMatchObject({
+    lineCount: 12,
+    sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+  });
+  course = addExplain(course, target, "The second function's closing brace", {
+    path: "src/vec.ts",
+    lines: [12, 12],
+  });
+  expect(course.replay.steps.at(-1)).toMatchObject({ lines: [7, 7] });
+  expect(() =>
+    addExplain(course, target, "Missing", { path: "src/vec.ts", lines: [4, 10] }),
+  ).toThrow(/not in the file yet/);
+  expect(() => take(course, target, "src/vec.ts", [[10, 12]])).toThrow(/would remove/);
 });

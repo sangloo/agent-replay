@@ -72,6 +72,7 @@ export {
   type Commit,
   type CommitStep,
   type CourseTarget,
+  type SourceRange,
   type ExplainStep,
   type LessonStep,
   type DeleteStep,
@@ -114,3 +115,23 @@ export {
   type Transcript,
   type TranscriptEvent,
 } from "./transcript.ts";
+
+export {
+  parseSourceReference,
+  validSourceRanges,
+  mapSourceRange,
+  sourceReferenceIndex,
+  type SourceDestination,
+  type SourceResolution,
+} from "./source-reference.ts";
+export {
+  parseCurriculum,
+  curriculumLessons,
+  studyHref,
+  type Curriculum,
+  type CurriculumChapter,
+  type CurriculumLesson,
+  type StudyCourse,
+  type StudyCatalog,
+  type StudyContext,
+} from "./curriculum.ts";

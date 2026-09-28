@@ -13,6 +13,8 @@ import * as React from "react";
 
 import { cn } from "@/ui";
 
+import { SourceNavigationContext } from "./source-context";
+
 import { CATEGORY_CLASS, languageOf, paint, tokenize } from "./highlight";
 import { parseBlocks, type Block } from "./markdown-parse";
 
@@ -42,7 +44,53 @@ const INLINE =
 
 /** Only links that go somewhere safe: the web, or a place in this page. */
 function safeHref(href: string): string | undefined {
+  if (/\\/.test(href) || [...href].some((char) => char.charCodeAt(0) <= 32))
+    return undefined;
   return /^(https?:\/\/|#|\/(?!\/)|\.\.?\/)/i.test(href) ? href : undefined;
+}
+
+function SourceLink({ href, label }: { href: string; label: string }) {
+  const navigation = React.useContext(SourceNavigationContext);
+  const result = navigation?.resolve(href) ?? {
+    reason: "Original source mapping is unavailable in this replay",
+  };
+  const destination = "destination" in result ? result.destination : undefined;
+  const caption = destination
+    ? `${destination.path} · original lines ${destination.lines.join("–")} · replay lines ${destination.displayed.join("–")}`
+    : "reason" in result
+      ? result.reason
+      : "Source reference unavailable";
+  return (
+    <span className="group relative inline-block max-w-full align-baseline">
+      <button
+        type="button"
+        disabled={!destination}
+        title={caption}
+        aria-label={
+          destination
+            ? `Go to ${label}, original lines ${destination.lines.join("–")}`
+            : `${label}: ${caption}`
+        }
+        onClick={() => {
+          if (destination) navigation?.navigate(destination);
+        }}
+        className="rounded-sm text-emphasis underline decoration-emphasis/40 underline-offset-2 focus-bar disabled:cursor-help disabled:text-text-low disabled:decoration-dotted"
+      >
+        {label}
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-72 max-w-[80vw] rounded-control border border-line bg-surface-base p-3 text-xs text-text-mid shadow-lg group-focus-within:block group-hover:block"
+      >
+        <span className="block break-words">{caption}</span>
+        {destination ? (
+          <code className="mt-2 block max-h-48 overflow-hidden font-mono text-2xs break-words whitespace-pre-wrap">
+            {destination.preview}
+          </code>
+        ) : null}
+      </span>
+    </span>
+  );
 }
 
 function Inline({ text }: { text: string }): React.ReactNode {
@@ -65,6 +113,10 @@ function Inline({ text }: { text: string }): React.ReactNode {
     else if (math !== undefined)
       out.push(<MathSpan key={key++} tex={math} display={false} />);
     else if (label !== undefined) {
+      if (href!.startsWith("source:")) {
+        out.push(<SourceLink key={key++} href={href!} label={label} />);
+        continue;
+      }
       const safe = safeHref(href!);
       out.push(
         safe ? (
@@ -137,6 +189,36 @@ function Blocks({ blocks }: { blocks: Block[] }) {
     <>
       {blocks.map((block, i) => {
         switch (block.kind) {
+          case "details":
+            return (
+              <details
+                key={i}
+                className="my-3 rounded-control border border-line px-3 py-2"
+              >
+                <summary className="cursor-pointer font-medium focus-bar">
+                  {block.title}
+                </summary>
+                <div className="mt-2">
+                  <Blocks blocks={block.blocks} />
+                </div>
+              </details>
+            );
+          case "callout":
+            return (
+              <aside
+                key={i}
+                aria-label={block.title}
+                className={cn(
+                  "my-3 rounded-control border-l-2 bg-surface-mid px-3 py-2",
+                  block.tone === "warning" ? "border-warning" : "border-emphasis",
+                )}
+              >
+                <p className="mb-1 text-xs font-semibold tracking-wide uppercase">
+                  {block.title}
+                </p>
+                <Blocks blocks={block.blocks} />
+              </aside>
+            );
           case "heading": {
             const Tag = `h${Math.min(6, block.level + 1)}` as "h2";
             return (

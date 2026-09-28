@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Replay } from "@agent-replay/core";
+import type { Replay, StudyContext, Curriculum } from "@agent-replay/core";
 
 /** The id the player looks for to run without its local service. */
 export const EMBED_ID = "replay-data";
@@ -43,7 +43,31 @@ function asset(dist: string, url: string): string {
 }
 
 /** The player and `replay` in one document. */
-export function exportHtml(replay: Replay, dist = playerDist()): string {
+export function exportHtml(
+  replay: Replay,
+  dist = playerDist(),
+  study?: StudyContext,
+): string {
+  const data =
+    `<script type="application/json" id="${EMBED_ID}">${safeJson(replay)}</script>` +
+    (study
+      ? `<script type="application/json" id="curriculum-data">${safeJson({ curriculum: study.curriculum, lessonId: study.lessonId })}</script>`
+      : "");
+  return bundleHtml(replay.title, data, dist);
+}
+
+export function exportCurriculumHtml(
+  curriculum: Curriculum,
+  exportBase = "",
+  dist = playerDist(),
+): string {
+  if (!/^(?:[\w-]+\/)*$/.test(exportBase))
+    throw new Error("Export base must be a relative folder path.");
+  const data = `<script type="application/json" id="curriculum-library">${safeJson({ curriculum, exportBase })}</script>`;
+  return bundleHtml(curriculum.title, data, dist);
+}
+
+function bundleHtml(titleText: string, data: string, dist: string): string {
   if (!hasPlayer(dist)) {
     throw new Error("The player is not built — run `pnpm build` first.");
   }
@@ -74,14 +98,13 @@ export function exportHtml(replay: Replay, dist = playerDist()): string {
       return "";
     },
   );
-  const title = replay.title.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"));
+  const title = titleText.replace(/[<&]/g, (c) => (c === "<" ? "&lt;" : "&amp;"));
   // Replacements are functions throughout: a string replacement reads `$&`
   // and `$'` as patterns, and a minified bundle is full of both.
   html = html.replace(
     /<title>[^<]*<\/title>/,
     () => `<title>${title} · Replay</title>`,
   );
-  const data = `<script type="application/json" id="${EMBED_ID}">${safeJson(replay)}</script>`;
   const code = scripts
     .map((script) => `<script type="module">${safeScript(script)}</script>`)
     .join("\n");

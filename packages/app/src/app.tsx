@@ -1,4 +1,9 @@
-import type { Replay } from "@agent-replay/core";
+import {
+  parseCurriculum,
+  curriculumLessons,
+  type StudyContext,
+  type Replay,
+} from "@agent-replay/core";
 import { LoaderCircle } from "lucide-react";
 import * as React from "react";
 
@@ -6,10 +11,12 @@ import { Button } from "@/ui";
 
 import { api, useLoad } from "./api";
 import { Library } from "./library";
+import { CourseLibrary, StandaloneCourseLibrary } from "./course-library";
 import { libraryHash, parseLibrary, type LibraryParams } from "./library-params";
 import { Player } from "./player/player";
 
 type Route =
+  | { page: "learn"; key?: string }
   | { page: "library"; params: LibraryParams }
   /** `at`: the step to open on — a link to a moment in the replay. */
   | { page: "replay"; id: string; at?: number }
@@ -18,12 +25,14 @@ type Route =
 function parse(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#/, "").split("?");
   const [, page, id] = path.split("/");
+  if (page === "learn") return { page: "learn", key: id };
   if ((page === "replay" || page === "session") && id) {
-    const at = Number(new URLSearchParams(search).get("at"));
+    const rawAt = new URLSearchParams(search).get("at");
+    const at = rawAt === null ? undefined : Number(rawAt);
     return {
       page,
       id: decodeURIComponent(id),
-      ...(Number.isInteger(at) && at > 0 ? { at } : {}),
+      ...(at !== undefined && Number.isSafeInteger(at) && at >= 0 ? { at } : {}),
     };
   }
   return { page: "library", params: parseLibrary(search) };
@@ -115,10 +124,11 @@ function Failed({ message }: { message: string }) {
 
 /** The step the address says the player is on — to keep the place on a reload. */
 function cursorInHash(): number | undefined {
-  const value = Number(
-    new URLSearchParams(window.location.hash.split("?")[1]).get("at"),
-  );
-  return Number.isInteger(value) && value > 0 ? value : undefined;
+  const raw = new URLSearchParams(window.location.hash.split("?")[1]).get("at");
+  const value = raw === null ? undefined : Number(raw);
+  return value !== undefined && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 /**
@@ -146,20 +156,42 @@ function useNewerCourse(id: string, shown: Replay | undefined): Replay | undefin
 
 function SavedReplay({ id, at }: { id: string; at?: number }) {
   const loaded = useLoad(id, api.replay);
+  const catalog = useLoad("curricula", api.curricula);
   const source = React.useMemo(() => ({ kind: "replays" as const, id }), [id]);
   const [replay, setReplay] = React.useState<{ data: Replay; at?: number }>();
   const shown = replay?.data ?? (loaded.state === "ready" ? loaded.data : undefined);
   const newer = useNewerCourse(id, shown);
   if (loaded.state === "loading") return <Loading what="Opening the replay…" />;
   if (loaded.state === "failed") return <Failed message={loaded.message} />;
+  if (shown?.source === "course" && catalog.state === "loading")
+    return <Loading what="Opening the course map…" />;
+  const course =
+    catalog.state === "ready"
+      ? catalog.data.courses.find((c) =>
+          curriculumLessons(c.curriculum).some((l) => `${c.key}:${l.replay}` === id),
+        )
+      : undefined;
+  const lesson =
+    course &&
+    curriculumLessons(course.curriculum).find(
+      (l) => `${course.key}:${l.replay}` === id,
+    );
+  const study = course && lesson ? { ...course, lessonId: lesson.id } : undefined;
   const added = newer ? newer.steps.length - shown!.steps.length : 0;
   return (
     <Player
       key={shown!.endedAt}
       replay={shown!}
       source={source}
+      study={study}
       at={replay ? replay.at : at}
-      onBack={back}
+      onBack={
+        study
+          ? () => {
+              window.location.hash = `#/learn/${study.key}`;
+            }
+          : back
+      }
       notice={
         newer ? (
           <>
@@ -240,24 +272,59 @@ function embedded(): Replay | undefined {
 }
 
 function Standalone({ replay }: { replay: Replay }) {
+  const [study] = React.useState<StudyContext | undefined>(() => {
+    try {
+      const input = JSON.parse(
+        document.getElementById("curriculum-data")?.textContent ?? "null",
+      );
+      if (!input) return undefined;
+      const curriculum = parseCurriculum(input.curriculum);
+      return curriculumLessons(curriculum).some((l) => l.id === input.lessonId)
+        ? { curriculum, lessonId: input.lessonId }
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  });
   const [at] = React.useState(() => {
     const value = Number(
       new URLSearchParams(window.location.hash.split("?")[1]).get("at"),
     );
     return Number.isInteger(value) && value > 0 ? value : undefined;
   });
-  return <Player replay={replay} at={at} />;
+  return <Player replay={replay} at={at} study={study} />;
 }
 
 const standalone = embedded();
+const standaloneLibrary = (() => {
+  try {
+    const input = JSON.parse(
+      document.getElementById("curriculum-library")?.textContent ?? "null",
+    );
+    if (
+      !input ||
+      typeof input.exportBase !== "string" ||
+      !/^(?:[\w-]+\/)*$/.test(input.exportBase)
+    )
+      return undefined;
+    return {
+      curriculum: parseCurriculum(input.curriculum),
+      exportBase: input.exportBase,
+    };
+  } catch {
+    return undefined;
+  }
+})();
 
 export function App() {
+  if (standaloneLibrary) return <StandaloneCourseLibrary {...standaloneLibrary} />;
   if (standalone) return <Standalone replay={standalone} />;
   return <Routed />;
 }
 
 function Routed() {
   const route = useRoute();
+  if (route.page === "learn") return <CourseLibrary courseKey={route.key} />;
   if (route.page === "replay")
     return <SavedReplay key={route.id} id={route.id} at={route.at} />;
   if (route.page === "session")

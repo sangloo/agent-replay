@@ -34,10 +34,16 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { realpathSync } from "node:fs";
 import { basename } from "node:path";
 
-import type { Replay } from "@agent-replay/core";
+import {
+  curriculumLessons,
+  type Replay,
+  type StudyCatalog,
+  type StudyContext,
+} from "@agent-replay/core";
 import type { Plugin } from "vite";
 
 import { captureSession, type Captured } from "./capture.ts";
+import { readStudyCourse } from "./curriculum.ts";
 import { exportHtml, hasPlayer } from "./export.ts";
 import * as git from "./git.ts";
 import {
@@ -389,6 +395,28 @@ export function createHandler(options: ReplayApiOptions) {
   const routes: [string, RegExp, Handler][] = [
     ["GET", /^\/projects$/, (): Project[] => projects()],
     [
+      "GET",
+      /^\/curricula$/,
+      (): StudyCatalog => {
+        const catalog: StudyCatalog = { courses: [], problems: [] };
+        for (const root of knownRoots()) {
+          try {
+            const course = readStudyCourse(root);
+            if (course) catalog.courses.push(course);
+          } catch (error) {
+            catalog.problems.push({
+              project: projectName(root),
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Could not read the curriculum.",
+            });
+          }
+        }
+        return catalog;
+      },
+    ],
+    [
       "POST",
       /^\/projects$/,
       (_, __, body): Project => {
@@ -593,10 +621,28 @@ export function createHandler(options: ReplayApiOptions) {
         : null;
     if (exporting) {
       try {
-        const replay =
-          exporting.length === 3
-            ? saved(exporting[1]!, exporting[2]!).replay
-            : liveCapture(exporting[1]!).replay;
+        const savedReplay =
+          exporting.length === 3 ? saved(exporting[1]!, exporting[2]!) : undefined;
+        const replay = savedReplay?.replay ?? liveCapture(exporting[1]!).replay;
+        let study: StudyContext | undefined;
+        let exportFile: string | undefined;
+        if (savedReplay && replay.source === "course") {
+          // A malformed optional map is reported in Learn; plain exports still work.
+          try {
+            const course = readStudyCourse(savedReplay.root);
+            const lesson =
+              course &&
+              curriculumLessons(course.curriculum).find(
+                (l) => l.replay === exporting[2],
+              );
+            if (course && lesson) {
+              study = { curriculum: course.curriculum, lessonId: lesson.id };
+              exportFile = lesson.exportFile;
+            }
+          } catch {
+            /* Optional metadata cannot break an existing replay. */
+          }
+        }
         if (!hasPlayer()) {
           throw new Problem(
             409,
@@ -604,7 +650,7 @@ export function createHandler(options: ReplayApiOptions) {
             "Exporting needs the built player — run `pnpm build` once, then try again.",
           );
         }
-        const html = exportHtml(replay);
+        const html = exportHtml(replay, undefined, study);
         const name =
           replay.title
             .toLowerCase()
@@ -615,7 +661,7 @@ export function createHandler(options: ReplayApiOptions) {
         response.setHeader("Content-Type", "text/html; charset=utf-8");
         response.setHeader(
           "Content-Disposition",
-          `attachment; filename="${name}.html"`,
+          `attachment; filename="${exportFile ?? `${name}.html`}"`,
         );
         response.setHeader("Cache-Control", "no-store");
         response.end(html);

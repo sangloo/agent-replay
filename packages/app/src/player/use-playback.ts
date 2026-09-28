@@ -55,6 +55,8 @@ function dwellSeconds(frame: Frame): number {
 
 /** Whether a step plays as typing — the only kind worth finishing on →. */
 export function isTyped(frame: Frame | undefined): boolean {
+  if (frame && "sourceMode" in frame.step && frame.step.sourceMode === "included")
+    return false;
   return Boolean(frame?.change?.applied && frame.change.hunks.length > 0);
 }
 

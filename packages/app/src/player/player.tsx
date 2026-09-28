@@ -6,7 +6,10 @@ import {
   evidenceOf,
   isChange,
   play,
+  sourceReferenceIndex,
+  type SourceDestination,
   type Replay,
+  type StudyContext,
 } from "@agent-replay/core";
 import {
   ArrowLeft,
@@ -39,6 +42,12 @@ import {
 
 import type { ReplaySource } from "../api";
 import { Choice } from "../choice";
+import { CourseNavigation } from "../course-navigation";
+import {
+  readStudyProgress,
+  saveStudyProgress,
+  studyProgressKey,
+} from "../study-progress";
 import { firstLine, stepLabel, when } from "../labels";
 import { isBoolean, isNumber, oneOf, usePersistent } from "../persist";
 import { ThemeToggle } from "../theme-toggle";
@@ -48,6 +57,7 @@ import type { Diffable } from "./compose";
 import { EvidencePanel } from "./evidence";
 import { FilesPanel } from "./files";
 import { LessonPanel } from "./lesson";
+import { SourceNavigationContext } from "./source-context";
 import { StepList } from "./steps";
 import { SPEEDS, usePlayback, type Speed } from "./use-playback";
 import { useRepo } from "./use-repo";
@@ -135,6 +145,7 @@ function Tool(props: React.ComponentProps<typeof IconButton>) {
 
 export interface PlayerProps {
   replay: Replay;
+  study?: StudyContext;
   /** Where it came from — for the rest of its repository's files. */
   source?: ReplaySource;
   /** The step to open on, from a link. */
@@ -155,6 +166,7 @@ export interface PlayerProps {
 
 export function Player({
   replay,
+  study,
   source,
   at,
   repo,
@@ -185,27 +197,46 @@ export function Player({
         .map((frame) => frame.index),
     [filter, playback, replay.notes],
   );
-  const transport = usePlayback(playback.frames, visible, at);
+  const progressKey = studyProgressKey(replay, study);
+  const [savedProgress] = React.useState(() =>
+    isCourse ? readStudyProgress(progressKey) : undefined,
+  );
+  const [reviewed, setReviewed] = React.useState(savedProgress?.reviewed ?? false);
+  const [studyPane, setStudyPane] = React.useState<"reading" | "code">("reading");
+  const initial =
+    at ?? savedProgress?.cursor ?? (isCourse ? Math.min(2, replay.steps.length) : 0);
+  const transport = usePlayback(playback.frames, visible, initial);
   const { cursor, progress, playing } = transport;
 
   // The address says where the replay is, so a link opens on this moment.
   React.useEffect(() => {
     const [path = ""] = window.location.hash.split("?");
-    const next = cursor > 0 ? `${path}?at=${cursor}` : path;
+    const next = isCourse || cursor > 0 ? `${path || "#"}?at=${cursor}` : path || "#";
     if (next !== window.location.hash) window.history.replaceState(null, "", next);
-  }, [cursor]);
+  }, [cursor, isCourse]);
 
-  const [view, setView] = usePersistent<View>("view", "change", isView);
-  const [filesOpen, setFilesOpen] = usePersistent("files-open", true, isBoolean);
+  const [view, setView] = usePersistent<View>(
+    isCourse ? "course-view" : "view",
+    isCourse ? "file" : "change",
+    isView,
+  );
+  const [filesOpen, setFilesOpen] = usePersistent(
+    isCourse ? "course-files-open" : "files-open",
+    !isCourse,
+    isBoolean,
+  );
   // Three panels crowd a laptop screen: the steps start shut below 1200px,
   // until the reviewer opens them (which is then remembered).
   const [stepsOpen, setStepsOpen] = usePersistent(
-    "notes-open",
-    window.innerWidth >= 1200,
+    isCourse ? "course-notes-open" : "notes-open",
+    isCourse || window.innerWidth >= 1200,
     isBoolean,
   );
   const filesWidth = usePanelWidth("files-width", 272);
-  const stepsWidth = usePanelWidth("notes-width", 340);
+  const stepsWidth = usePanelWidth(
+    isCourse ? "course-notes-width" : "notes-width",
+    isCourse ? 480 : 340,
+  );
   const [storedSide, setSide] = usePersistent<Side>(
     isCourse ? "course-side" : "side",
     isCourse ? "lesson" : "steps",
@@ -238,13 +269,44 @@ export function Player({
       setPin(path === undefined ? undefined : { path, at: cursor }),
     [cursor],
   );
-  const selectFile = React.useCallback((path: string) => setPinned(path), [setPinned]);
+  const [reference, setReference] = React.useState<
+    SourceDestination & { returnCursor: number }
+  >();
+  const selectFile = React.useCallback(
+    (path: string) => {
+      setPinned(path);
+      setReference(undefined);
+    },
+    [setPinned],
+  );
   const { jump, toggle, forward, back, setSpeed } = transport;
   const jumpToPosition = React.useCallback(
     (next: number) => jump(next === 0 ? 0 : visible[next - 1]! + 1),
     [jump, visible],
   );
-  const path = pinned ?? followed;
+  const activeReference = reference?.cursor === cursor ? reference : undefined;
+  React.useEffect(() => {
+    if (isCourse && !activeReference)
+      saveStudyProgress(progressKey, { cursor, reviewed, updatedAt: Date.now() });
+  }, [cursor, reviewed, isCourse, progressKey, activeReference]);
+  const sourceIndex = React.useMemo(() => sourceReferenceIndex(replay), [replay]);
+  const navigation = React.useMemo(
+    () => ({
+      resolve: (href: string) => sourceIndex.resolve(href, cursor),
+      navigate: (destination: SourceDestination) => {
+        setStudyPane("code");
+        setReference({ ...destination, returnCursor: cursor });
+        setPin(undefined);
+        jump(destination.cursor);
+      },
+    }),
+    [sourceIndex, cursor, jump],
+  );
+  const sourceCoverage = React.useMemo(
+    () => sourceIndex.coverage(cursor),
+    [sourceIndex, cursor],
+  );
+  const path = activeReference?.path ?? pinned ?? followed;
   const files = React.useMemo(() => playback.filesAt(cursor), [playback, cursor]);
   const entry = files.find((file) => file.path === path);
 
@@ -296,6 +358,8 @@ export function Player({
   } => {
     if (!path || !inReplay) return { content: null, progress: 1 };
     const now = playback.contentAt(path, cursor);
+    if (activeReference && activeReference.path === path)
+      return { content: now, progress: 1, focus: activeReference.displayed };
     // An explanation about code shows the file as it stands, those lines lit.
     if (explained && explained.path === path) {
       const count = (now ?? "").split("\n").length;
@@ -307,12 +371,18 @@ export function Player({
     }
     // The file as it reads — but a change being made to it still plays, its
     // new lines typed in place and marked, so playback is never a jump cut.
+    const changeStep =
+      lastChange === undefined ? undefined : playback.frames[lastChange]?.step;
+    const changeProgress =
+      changeStep && "sourceMode" in changeStep && changeStep.sourceMode === "included"
+        ? 1
+        : progress;
     if (view === "file" && lastChange !== undefined && lastChange === cursor - 1) {
       const change = playback.frames[lastChange]!.change!;
       return {
         diff: change,
         content: now,
-        progress,
+        progress: changeProgress,
         counts: change,
         hideRemoved: true,
       };
@@ -323,7 +393,7 @@ export function Player({
         return {
           diff: change,
           content: now,
-          progress: lastChange === cursor - 1 ? progress : 1,
+          progress: lastChange === cursor - 1 ? changeProgress : 1,
           counts: change,
         };
       }
@@ -341,6 +411,7 @@ export function Player({
     progress,
     sinceBase,
     explained,
+    activeReference,
   ]);
 
   // What the agent checked, and whether it held.
@@ -588,308 +659,391 @@ export function Player({
   const name = path ? path.slice(path.lastIndexOf("/") + 1) : "";
 
   return (
-    <div className="flex h-dvh flex-col bg-surface-base text-text-high">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line pr-2 pl-1.5">
-        {onBack ? (
-          <Tool label="All replays" onClick={onBack}>
-            <ArrowLeft />
-          </Tool>
-        ) : (
-          <span aria-hidden className="w-1" />
-        )}
-        <div className="flex min-w-0 items-baseline gap-2.5">
-          <h1 className="min-w-0 truncate text-sm font-medium">{replay.title}</h1>
-          <p className="hidden shrink-0 text-xs text-text-low lg:block">
-            {repo ?? replay.repo.name}
-            {replay.repo.base ? (
-              <span className="font-mono">
-                {" "}
-                {short(replay.repo.base)} → {short(replay.repo.end) ?? "…"}
-                {replay.repo.dirty ? "+" : ""}
-              </span>
-            ) : null}
-            {` · ${agentName(replay.source)}`}
-          </p>
-        </div>
-        <span className="ml-auto hidden shrink-0 font-mono text-xs text-text-low tabular-nums md:inline">
-          <span className="text-success-ink">+{playback.totals.added}</span>{" "}
-          <span className="text-danger-ink">−{playback.totals.removed}</span>
-          {"  "}
-          {playback.totals.files} files
-        </span>
-        {onSave ? (
-          <Button size="sm" variant="ghost" onClick={onSave} loading={saving}>
-            {saved ? "Update saved copy" : "Save to repo"}
-          </Button>
-        ) : null}
-        {source ? (
-          <a
-            href={`/api/${source.kind}/${encodeURIComponent(source.id)}/export`}
-            download
-            title="One HTML file that plays this replay anywhere, offline"
-            className="inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-3.5"
-          >
-            <Download aria-hidden />
-            Export
-          </a>
-        ) : null}
-        <span className="flex items-center">
-          <Tool
-            label={filesOpen ? "Hide files ( [ )" : "Show files ( [ )"}
-            aria-pressed={filesOpen}
-            onClick={toggleFiles}
-          >
-            <PanelLeft />
-          </Tool>
-          <Tool
-            label={stepsOpen ? "Hide steps ( ] )" : "Show steps ( ] )"}
-            aria-pressed={stepsOpen}
-            onClick={toggleSteps}
-          >
-            <PanelRight />
-          </Tool>
-          <Tool label="Keyboard shortcuts ( ? )" onClick={() => setHelp(true)}>
-            <Keyboard />
-          </Tool>
-          <ThemeToggle />
-        </span>
-      </header>
-      <ShortcutsSheet open={help} onOpenChange={setHelp} groups={SHORTCUTS} />
-
-      {warnings.length ? (
-        <p className="border-b border-line px-4 py-1.5 text-xs text-warning-ink">
-          {warnings.join(" ")}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="border-b border-line bg-emphasis-subtle px-4 py-1.5 text-xs text-text-mid">
-          {notice}
-        </p>
-      ) : null}
-
-      <div className="flex min-h-0 flex-1">
-        {filesOpen ? (
-          <ResizablePanel
-            side="right"
-            min={200}
-            max={560}
-            label="Resize the files panel"
-            {...filesWidth}
-            className="border-r border-line bg-surface-low"
-          >
-            <nav aria-label="Files" className="h-full">
-              <FilesPanel
-                files={files}
-                repo={tree?.state === "ready" ? tree.data.paths : undefined}
-                repoState={repoState}
-                onWantRepo={source ? repoFiles.loadTree : undefined}
-                current={path}
-                active={frame?.change?.path}
-                onSelect={selectFile}
-                filterRef={filterRef}
-              />
-            </nav>
-          </ResizablePanel>
-        ) : null}
-
-        <main className="flex min-w-0 flex-1 flex-col">
-          <div className="relative flex h-10 shrink-0 items-center gap-3 border-b border-line pr-2 pl-4 text-xs">
-            <span className="min-w-0 truncate font-mono text-text-low" title={path}>
-              {dir}
-              <span className="text-text-high">{name}</span>
-            </span>
-            {path && !entry ? (
-              <span className="shrink-0 text-text-low">Unchanged in this replay</span>
-            ) : null}
-            {shown.counts && (shown.counts.added || shown.counts.removed) ? (
-              <span className="shrink-0 font-mono tabular-nums">
-                <span className="text-success-ink">+{shown.counts.added}</span>{" "}
-                <span className="text-danger-ink">−{shown.counts.removed}</span>
-              </span>
-            ) : null}
-            {pinned ? (
-              <button
-                type="button"
-                onClick={() => setPinned(undefined)}
-                className="shrink-0 rounded-control text-text-low focus-bar hover:text-text-high"
-              >
-                Follow the replay
-              </button>
-            ) : null}
-            <Choice
-              label="Show"
-              value={view}
-              options={VIEWS}
-              onChange={setView}
-              className="ml-auto shrink-0"
-            />
-            {shown.progress < 1 ? (
-              // How far the change on screen has played.
-              <span
-                aria-hidden
-                className="absolute bottom-0 left-0 h-0.5 bg-emphasis"
-                style={{ width: `${shown.progress * 100}%` }}
-              />
-            ) : null}
+    <SourceNavigationContext.Provider value={navigation}>
+      <div
+        className={`flex h-dvh flex-col bg-surface-base text-text-high ${isCourse ? "study-player" : ""}`}
+        data-study-pane={studyPane}
+      >
+        <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line pr-2 pl-1.5">
+          {onBack ? (
+            <Tool label={study ? "Course map" : "All replays"} onClick={onBack}>
+              <ArrowLeft />
+            </Tool>
+          ) : (
+            <span aria-hidden className="w-1" />
+          )}
+          <div className="flex min-w-0 items-baseline gap-2.5">
+            <h1 className="min-w-0 truncate text-sm font-medium">{replay.title}</h1>
+            <p className="hidden shrink-0 text-xs text-text-low lg:block">
+              {repo ?? replay.repo.name}
+              {replay.repo.base ? (
+                <span className="font-mono">
+                  {" "}
+                  {short(replay.repo.base)} → {short(replay.repo.end) ?? "…"}
+                  {replay.repo.dirty ? "+" : ""}
+                </span>
+              ) : null}
+              {` · ${agentName(replay.source)}`}
+            </p>
           </div>
-          <Caption replay={replay} frame={frame} cursor={cursor} onJump={jump} />
-          <div className="min-h-0 flex-1">{body}</div>
-        </main>
-
-        {stepsOpen ? (
-          <ResizablePanel
-            side="left"
-            min={260}
-            max={640}
-            label="Resize the steps panel"
-            {...stepsWidth}
-            className="border-l border-line bg-surface-low"
-          >
-            <aside aria-label="Session" className="flex h-full flex-col">
-              <div className="flex h-10 shrink-0 items-center border-b border-line px-2">
-                <Choice
-                  label="Side panel"
-                  value={side}
-                  onChange={setSide}
-                  options={
-                    isCourse
-                      ? [
-                          {
-                            value: "lesson",
-                            label: "Lesson",
-                            hint: "The lesson, as it is taught (E)",
-                          },
-                          {
-                            value: "steps",
-                            label: "Steps",
-                            hint: "Every step of the course (E)",
-                          },
-                        ]
-                      : [
-                          {
-                            value: "steps",
-                            label: "Steps",
-                            hint: "Every step of the session (E)",
-                          },
-                          {
-                            value: "evidence",
-                            hint: "What the agent checked, and whether it held (E)",
-                            label: (
-                              <>
-                                Evidence
-                                {worries ? (
-                                  <span className="rounded-full bg-warning-subtle px-1.5 text-2xs font-medium text-warning-ink tabular-nums">
-                                    {worries}
-                                  </span>
-                                ) : null}
-                              </>
-                            ),
-                          },
-                        ]
-                  }
-                />
-              </div>
-              <div key={side} className="min-h-0 flex-1 overflow-auto">
-                {side === "lesson" ? (
-                  <LessonPanel
-                    replay={replay}
-                    frames={playback.frames}
-                    cursor={cursor}
-                    onJump={jump}
-                  />
-                ) : side === "steps" ? (
-                  <StepList
-                    replay={replay}
-                    frames={playback.frames}
-                    visible={visible}
-                    cursor={cursor}
-                    onJump={jump}
-                  />
-                ) : (
-                  <EvidencePanel
-                    ledger={ledger}
-                    replay={replay}
-                    cursor={cursor}
-                    onJump={jump}
-                  />
-                )}
-              </div>
-            </aside>
-          </ResizablePanel>
-        ) : null}
-      </div>
-
-      <footer className="flex h-14 shrink-0 items-center gap-3 border-t border-line px-3">
-        <div className="flex items-center gap-1">
-          <Tool label="Previous step (←)" onClick={back}>
-            <SkipBack />
-          </Tool>
-          <IconButton
-            label={playing ? "Pause (space)" : "Play (space)"}
-            variant="emphasis"
-            size="md"
-            className="rounded-full"
-            onClick={toggle}
-          >
-            {playing ? <Pause /> : <Play />}
-          </IconButton>
-          <Tool label="Play the next step (→)" onClick={forward}>
-            <SkipForward />
-          </Tool>
-        </div>
-        <div className="min-w-0 flex-1">
-          <Scrubber
-            steps={scrubSteps}
-            cursor={position}
-            label="Session timeline"
-            baseLabel="Base commit"
-            onJump={jumpToPosition}
-          />
-        </div>
-        {coverage ? (
-          <span
-            className="shrink-0 font-mono text-xs text-text-low tabular-nums"
-            title={`${coverage.files} of ${coverage.totalFiles} files exist; ${coverage.lines} of ${coverage.totalLines} lines hold their final text`}
-          >
-            {percent(coverage.files, coverage.totalFiles)} files ·{" "}
-            {percent(coverage.lines, coverage.totalLines)} lines
+          <span className="ml-auto hidden shrink-0 font-mono text-xs text-text-low tabular-nums md:inline">
+            <span className="text-success-ink">+{playback.totals.added}</span>{" "}
+            <span className="text-danger-ink">−{playback.totals.removed}</span>
+            {"  "}
+            {playback.totals.files} files
           </span>
+          {onSave ? (
+            <Button size="sm" variant="ghost" onClick={onSave} loading={saving}>
+              {saved ? "Update saved copy" : "Save to repo"}
+            </Button>
+          ) : null}
+          {source ? (
+            <a
+              href={`/api/${source.kind}/${encodeURIComponent(source.id)}/export`}
+              download
+              title="One HTML file that plays this replay anywhere, offline"
+              className="inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-3.5"
+            >
+              <Download aria-hidden />
+              Standalone HTML
+            </a>
+          ) : null}
+          <span className="flex items-center">
+            <Tool
+              label={filesOpen ? "Hide files ( [ )" : "Show files ( [ )"}
+              aria-pressed={filesOpen}
+              onClick={toggleFiles}
+            >
+              <PanelLeft />
+            </Tool>
+            <Tool
+              label={stepsOpen ? "Hide steps ( ] )" : "Show steps ( ] )"}
+              aria-pressed={stepsOpen}
+              onClick={toggleSteps}
+            >
+              <PanelRight />
+            </Tool>
+            <Tool label="Keyboard shortcuts ( ? )" onClick={() => setHelp(true)}>
+              <Keyboard />
+            </Tool>
+            <ThemeToggle />
+          </span>
+        </header>
+        {study && (
+          <CourseNavigation
+            study={study}
+            reviewed={reviewed}
+            onReviewed={() => setReviewed(!reviewed)}
+          />
+        )}
+        {isCourse && (
+          <div className="study-mobile-tabs" role="group" aria-label="Study pane">
+            <button
+              type="button"
+              aria-pressed={studyPane === "reading"}
+              onClick={() => {
+                setStudyPane("reading");
+                setStepsOpen(true);
+                setSide("lesson");
+              }}
+            >
+              Read lesson
+            </button>
+            <button
+              type="button"
+              aria-pressed={studyPane === "code"}
+              onClick={() => setStudyPane("code")}
+            >
+              Inspect source
+            </button>
+          </div>
+        )}
+        <ShortcutsSheet open={help} onOpenChange={setHelp} groups={SHORTCUTS} />
+
+        {warnings.length ? (
+          <p className="border-b border-line px-4 py-1.5 text-xs text-warning-ink">
+            {warnings.join(" ")}
+          </p>
         ) : null}
-        <span className="shrink-0 font-mono text-xs text-text-low tabular-nums">
-          {position} / {visible.length}
-        </span>
-        <Select
-          value={filter}
-          onValueChange={(next) => isFilter(next) && setFilter(next)}
-        >
-          <SelectTrigger size="sm" className="w-32 shrink-0" aria-label="Steps shown">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="changes">Changes</SelectItem>
-            <SelectItem value="all">Every step</SelectItem>
-            {noted.length ? (
-              <SelectItem value="notes">Notes ({noted.length})</SelectItem>
-            ) : null}
-          </SelectContent>
-        </Select>
-        <Select
-          value={String(transport.speed)}
-          onValueChange={(next) => setSpeed(Number(next) as Speed)}
-        >
-          <SelectTrigger size="sm" className="w-20 shrink-0" aria-label="Speed">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {SPEEDS.map((speed) => (
-              <SelectItem key={speed} value={String(speed)}>
-                {speed}×
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </footer>
-    </div>
+        {notice ? (
+          <p className="border-b border-line bg-emphasis-subtle px-4 py-1.5 text-xs text-text-mid">
+            {notice}
+          </p>
+        ) : null}
+
+        <div className="flex min-h-0 flex-1">
+          {filesOpen ? (
+            <ResizablePanel
+              side="right"
+              min={200}
+              max={560}
+              label="Resize the files panel"
+              {...filesWidth}
+              className="study-files border-r border-line bg-surface-low"
+            >
+              <nav aria-label="Files" className="h-full">
+                <FilesPanel
+                  files={files}
+                  repo={tree?.state === "ready" ? tree.data.paths : undefined}
+                  repoState={repoState}
+                  onWantRepo={source ? repoFiles.loadTree : undefined}
+                  current={path}
+                  active={frame?.change?.path}
+                  onSelect={selectFile}
+                  filterRef={filterRef}
+                />
+              </nav>
+            </ResizablePanel>
+          ) : null}
+
+          <main className="study-code flex min-w-0 flex-1 flex-col">
+            <div className="relative flex h-10 shrink-0 items-center gap-3 border-b border-line pr-2 pl-4 text-xs">
+              <span className="min-w-0 truncate font-mono text-text-low" title={path}>
+                {dir}
+                <span className="text-text-high">{name}</span>
+              </span>
+              {path && !entry ? (
+                <span className="shrink-0 text-text-low">Unchanged in this replay</span>
+              ) : null}
+              {shown.counts && (shown.counts.added || shown.counts.removed) ? (
+                <span className="shrink-0 font-mono tabular-nums">
+                  <span className="text-success-ink">+{shown.counts.added}</span>{" "}
+                  <span className="text-danger-ink">−{shown.counts.removed}</span>
+                </span>
+              ) : null}
+              {pinned ? (
+                <button
+                  type="button"
+                  onClick={() => setPinned(undefined)}
+                  className="shrink-0 rounded-control text-text-low focus-bar hover:text-text-high"
+                >
+                  Follow the replay
+                </button>
+              ) : null}
+              <Choice
+                label="Show"
+                value={view}
+                options={VIEWS}
+                onChange={setView}
+                className="ml-auto shrink-0"
+              />
+              {shown.progress < 1 ? (
+                // How far the change on screen has played.
+                <span
+                  aria-hidden
+                  className="absolute bottom-0 left-0 h-0.5 bg-emphasis"
+                  style={{ width: `${shown.progress * 100}%` }}
+                />
+              ) : null}
+            </div>
+            <Caption replay={replay} frame={frame} cursor={cursor} onJump={jump} />
+            <div className="min-h-0 flex-1">{body}</div>
+          </main>
+
+          {stepsOpen ? (
+            <ResizablePanel
+              side="left"
+              min={260}
+              max={640}
+              label="Resize the steps panel"
+              {...stepsWidth}
+              className="study-reading border-l border-line bg-surface-low"
+            >
+              <aside aria-label="Session" className="flex h-full flex-col">
+                <div className="flex h-10 shrink-0 items-center border-b border-line px-2">
+                  <Choice
+                    label="Side panel"
+                    value={side}
+                    onChange={setSide}
+                    options={
+                      isCourse
+                        ? [
+                            {
+                              value: "lesson",
+                              label: "Lesson",
+                              hint: "The lesson, as it is taught (E)",
+                            },
+                            {
+                              value: "steps",
+                              label: "Steps",
+                              hint: "Every step of the course (E)",
+                            },
+                          ]
+                        : [
+                            {
+                              value: "steps",
+                              label: "Steps",
+                              hint: "Every step of the session (E)",
+                            },
+                            {
+                              value: "evidence",
+                              hint: "What the agent checked, and whether it held (E)",
+                              label: (
+                                <>
+                                  Evidence
+                                  {worries ? (
+                                    <span className="rounded-full bg-warning-subtle px-1.5 text-2xs font-medium text-warning-ink tabular-nums">
+                                      {worries}
+                                    </span>
+                                  ) : null}
+                                </>
+                              ),
+                            },
+                          ]
+                    }
+                  />
+                </div>
+                <div key={side} className="min-h-0 flex-1 overflow-auto">
+                  {side === "lesson" ? (
+                    <LessonPanel
+                      replay={replay}
+                      frames={playback.frames}
+                      cursor={cursor}
+                      onJump={jump}
+                      onInspect={(next) => {
+                        const step = playback.frames[next - 1]?.step;
+                        const path = step && "path" in step ? step.path : undefined;
+                        const lineCount =
+                          path && replay.course?.sources?.[path]?.lineCount;
+                        const result =
+                          path && lineCount
+                            ? sourceIndex.resolve(
+                                `source:${path}#L1-L${lineCount}`,
+                                next,
+                              )
+                            : undefined;
+                        if (result && "destination" in result)
+                          navigation.navigate(result.destination);
+                        else {
+                          setStudyPane("code");
+                          jump(next);
+                        }
+                      }}
+                    />
+                  ) : side === "steps" ? (
+                    <StepList
+                      replay={replay}
+                      frames={playback.frames}
+                      visible={visible}
+                      cursor={cursor}
+                      onJump={jump}
+                    />
+                  ) : (
+                    <EvidencePanel
+                      ledger={ledger}
+                      replay={replay}
+                      cursor={cursor}
+                      onJump={jump}
+                    />
+                  )}
+                </div>
+              </aside>
+            </ResizablePanel>
+          ) : null}
+        </div>
+
+        {activeReference ? (
+          <div className="flex items-center gap-3 border-t border-line bg-surface-mid px-3 py-2 text-xs">
+            <span className="min-w-0 flex-1 truncate">
+              Pinned source: {activeReference.path} · original lines{" "}
+              {activeReference.lines.join("–")} → replay lines{" "}
+              {activeReference.displayed.join("–")}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 text-emphasis underline focus-bar"
+              onClick={() => {
+                jump(activeReference.returnCursor);
+                setReference(undefined);
+                setStudyPane("reading");
+              }}
+            >
+              Return to explanation
+            </button>
+          </div>
+        ) : null}
+        <footer className="study-transport flex h-14 shrink-0 items-center gap-3 border-t border-line px-3">
+          <div className="flex items-center gap-1">
+            <Tool label="Previous step (←)" onClick={back}>
+              <SkipBack />
+            </Tool>
+            <IconButton
+              label={playing ? "Pause (space)" : "Play (space)"}
+              variant="emphasis"
+              size="md"
+              className="rounded-full"
+              onClick={toggle}
+            >
+              {playing ? <Pause /> : <Play />}
+            </IconButton>
+            <Tool label="Play the next step (→)" onClick={forward}>
+              <SkipForward />
+            </Tool>
+          </div>
+          <div className="min-w-0 flex-1">
+            <Scrubber
+              steps={scrubSteps}
+              cursor={position}
+              label="Session timeline"
+              baseLabel="Base commit"
+              onJump={jumpToPosition}
+            />
+          </div>
+          {sourceCoverage ? (
+            <span
+              className="hidden shrink-0 font-mono text-2xs text-text-low xl:inline"
+              title="Current selected-file source: explained in depth versus included for completeness. Bulk imports preserve earlier explanations; they do not claim conceptual mastery. Remaining source is not yet shown."
+            >
+              Explained: {sourceCoverage.explained} · Included:{" "}
+              {sourceCoverage.included} / {sourceCoverage.total} selected lines
+            </span>
+          ) : null}
+          {coverage ? (
+            <span
+              className="hidden shrink-0 font-mono text-xs text-text-low tabular-nums md:inline"
+              title={`${coverage.files} of ${coverage.totalFiles} files exist; ${coverage.lines} of ${coverage.totalLines} lines hold their final text`}
+            >
+              {isCourse ? "Session: " : ""}
+              {percent(coverage.files, coverage.totalFiles)} files ·{" "}
+              {percent(coverage.lines, coverage.totalLines)} lines
+            </span>
+          ) : null}
+          <span className="shrink-0 font-mono text-xs text-text-low tabular-nums">
+            {position} / {visible.length}
+          </span>
+          <Select
+            value={filter}
+            onValueChange={(next) => isFilter(next) && setFilter(next)}
+          >
+            <SelectTrigger size="sm" className="w-32 shrink-0" aria-label="Steps shown">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="changes">Changes</SelectItem>
+              <SelectItem value="all">Every step</SelectItem>
+              {noted.length ? (
+                <SelectItem value="notes">Notes ({noted.length})</SelectItem>
+              ) : null}
+            </SelectContent>
+          </Select>
+          <Select
+            value={String(transport.speed)}
+            onValueChange={(next) => setSpeed(Number(next) as Speed)}
+          >
+            <SelectTrigger size="sm" className="w-20 shrink-0" aria-label="Speed">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SPEEDS.map((speed) => (
+                <SelectItem key={speed} value={String(speed)}>
+                  {speed}×
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </footer>
+      </div>
+    </SourceNavigationContext.Provider>
   );
 }
 

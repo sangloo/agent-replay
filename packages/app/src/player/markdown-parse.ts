@@ -12,7 +12,14 @@ export type Block =
   | { kind: "quote"; blocks: Block[] }
   | { kind: "list"; ordered: boolean; items: Block[][] }
   | { kind: "table"; head: string[]; rows: string[][] }
-  | { kind: "rule" };
+  | { kind: "rule" }
+  | {
+      kind: "callout";
+      tone: "note" | "tip" | "warning" | "checkpoint";
+      title: string;
+      blocks: Block[];
+    }
+  | { kind: "details"; title: string; blocks: Block[] };
 
 const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
 /** A line that starts a block of its own, ending a paragraph or list item. */
@@ -37,6 +44,19 @@ export function parseBlocks(source: string): Block[] {
     if (!line.trim()) {
       i++;
       continue;
+    }
+    const details = /^:::details[ \t]+(.+)$/.exec(line.trim());
+    if (details) {
+      const end = lines.findIndex((value, at) => at > i && value.trim() === ":::");
+      if (end > i) {
+        blocks.push({
+          kind: "details",
+          title: details[1]!,
+          blocks: parseBlocks(lines.slice(i + 1, end).join("\n")),
+        });
+        i = end + 1;
+        continue;
+      }
     }
     const fence = /^\s*(```+|~~~+)\s*([\w+-]*)/.exec(line);
     if (fence) {
@@ -84,7 +104,17 @@ export function parseBlocks(source: string): Block[] {
       const body: string[] = [];
       while (i < lines.length && lines[i]!.trimStart().startsWith(">"))
         body.push(lines[i++]!.trimStart().replace(/^>\s?/, ""));
-      blocks.push({ kind: "quote", blocks: parseBlocks(body.join("\n")) });
+      const callout = /^\[!(NOTE|TIP|WARNING|CHECKPOINT)\](?:\s+(.*))?$/.exec(
+        body[0] ?? "",
+      );
+      if (callout)
+        blocks.push({
+          kind: "callout",
+          tone: callout[1]!.toLowerCase() as "note" | "tip" | "warning" | "checkpoint",
+          title: callout[2] || callout[1]!,
+          blocks: parseBlocks(body.slice(1).join("\n")),
+        });
+      else blocks.push({ kind: "quote", blocks: parseBlocks(body.join("\n")) });
       continue;
     }
     if (
@@ -154,8 +184,16 @@ export function parseBlocks(source: string): Block[] {
 export function plainText(markdown: string): string {
   return (
     markdown
+      // Captions must not reveal a worked answer hidden inside a disclosure.
+      .replace(
+        /^[ \t]*:::details[ \t]+([^\r\n]+)\r?\n[\s\S]*?^[ \t]*:::[ \t]*\r?$/gm,
+        "$1",
+      )
       .replace(/```[\s\S]*?```/g, " ")
       .replace(/\$\$[\s\S]*?\$\$/g, " ")
+      .replace(/^\s*>\s?(?:\[!(?:NOTE|TIP|WARNING|CHECKPOINT)\]\s*)?/gm, "")
+      .replace(/^:::details\s*/gm, "")
+      .replace(/^:::\s*$/gm, "")
       .replace(/^#+\s*/gm, "")
       // Inline maths reads as its formula, without the markup around it.
       .replace(/\$([^$\n]+)\$/g, (_math, tex: string) =>

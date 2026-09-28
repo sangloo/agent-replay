@@ -48,6 +48,9 @@ export interface SayStep extends StepBase {
   text: string;
 }
 
+/** Inclusive original source ranges, in displayed order. */
+export type SourceRange = [number, number];
+
 /** A string replacement, exactly as the Edit tool received it. */
 export interface EditStep extends StepBase {
   kind: "edit";
@@ -59,6 +62,10 @@ export interface EditStep extends StepBase {
   via?: string;
   /** Teaching material — an example, a worked note — not part of the repository. */
   aside?: true;
+  /** Exact original line ranges after this take; absent for handwritten drafts. */
+  sourceLines?: SourceRange[];
+  /** Exact full-file import for completeness, not a claim of deep explanation. */
+  sourceMode?: "included";
 }
 
 /** A whole-file write: a new file, or a rewrite of an existing one. */
@@ -70,6 +77,10 @@ export interface WriteStep extends StepBase {
   via?: string;
   /** Teaching material — an example, a worked note — not part of the repository. */
   aside?: true;
+  /** Exact original line ranges after this take; absent for handwritten drafts. */
+  sourceLines?: SourceRange[];
+  /** Exact full-file import for completeness, not a claim of deep explanation. */
+  sourceMode?: "included";
 }
 
 /** A file removed by a tool call (Codex's `*** Delete File:`, say). */
@@ -199,6 +210,10 @@ export interface ReplayRepo {
 
 /** What a course rebuilds: a repository at one revision, or part of it. */
 export interface CourseTarget {
+  /** Explicit bounded opt-in for large source files; defaults to 512 KiB. */
+  maxFileBytes?: number;
+  /** Pinned file identity and denominator; optional for older courses. */
+  sources?: Record<string, { lineCount: number; sha256: string }>;
   /** The commit whose files the course arrives at. */
   rev: string;
   /** Only these paths (directories or files); every file when absent. */

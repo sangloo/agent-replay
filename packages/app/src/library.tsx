@@ -252,7 +252,13 @@ export function Library({
             onChange={(root) => onParams({ ...params, project: root, page: 1 })}
             onOpenFolder={() => setOpening(true)}
           />
-          <span className="ml-auto">
+          <a
+            href="#/learn"
+            className="ml-auto rounded-control px-3 py-1 text-sm font-medium focus-bar hover:bg-hover"
+          >
+            Learn / Chapters
+          </a>
+          <span>
             <ThemeToggle />
           </span>
         </header>

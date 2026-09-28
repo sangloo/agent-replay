@@ -38,8 +38,18 @@ await build({
   logLevel: "warn",
   // No source maps: they would triple the download for a debugging aid the
   // package's users have no source to map to.
-  build: { outDir: join(out, "dist"), emptyOutDir: true, sourcemap: false },
+  build: {
+    outDir: join(out, "dist"),
+    emptyOutDir: true,
+    sourcemap: false,
+    license: { fileName: "THIRD_PARTY_LICENSES.md" },
+  },
 });
+// Font assets arrive through CSS, outside Vite's JavaScript license report.
+cpSync(
+  join(app, "node_modules/geist/LICENSE.txt"),
+  join(out, "dist/Geist-LICENSE.txt"),
+);
 
 // 2. The CLI and the local service, as one file.
 await build({
@@ -53,6 +63,7 @@ await build({
     target: "node20",
     minify: false,
     sourcemap: false,
+    license: { fileName: "THIRD_PARTY_LICENSES.md" },
     rollupOptions: {
       output: { format: "es", entryFileNames: "cli.mjs", codeSplitting: false },
     },
