@@ -42,7 +42,7 @@ import {
 
 import type { ReplaySource } from "../api";
 import { Choice } from "../choice";
-import { CourseNavigation } from "../course-navigation";
+import { CourseActions, CourseOutline } from "../course-navigation";
 import {
   readStudyProgress,
   saveStudyProgress,
@@ -94,8 +94,8 @@ const VIEWS = [
 ] as const;
 const isView = oneOf<View>("change", "base", "file");
 
-type Side = "steps" | "evidence" | "lesson";
-const isSide = oneOf<Side>("steps", "evidence", "lesson");
+type Side = "steps" | "evidence" | "lesson" | "courses";
+const isSide = oneOf<Side>("steps", "evidence", "lesson", "courses");
 
 const SHORTCUTS: ShortcutGroup[] = [
   {
@@ -180,7 +180,12 @@ export function Player({
   const playback = React.useMemo(() => play(replay), [replay]);
   // A course teaches: its lessons lead, and there is nothing to audit.
   const isCourse = replay.source === "course";
-  const [filter, setFilter] = usePersistent<Filter>("filter", "changes", isFilter);
+  const [storedFilter, setFilter] = usePersistent<Filter>(
+    "filter",
+    "changes",
+    isFilter,
+  );
+  const filter = isCourse ? "all" : storedFilter;
   const visible = React.useMemo(
     () =>
       playback.frames
@@ -245,9 +250,11 @@ export function Player({
   const side: Side =
     isCourse && storedSide === "evidence"
       ? "lesson"
-      : !isCourse && storedSide === "lesson"
+      : !isCourse && (storedSide === "lesson" || storedSide === "courses")
         ? "steps"
-        : storedSide;
+        : storedSide === "courses" && !study
+          ? "lesson"
+          : storedSide;
   const [help, setHelp] = React.useState(false);
   const filterRef = React.useRef<HTMLInputElement>(null);
   const repoFiles = useRepo(source);
@@ -661,7 +668,7 @@ export function Player({
   return (
     <SourceNavigationContext.Provider value={navigation}>
       <div
-        className={`flex h-dvh flex-col bg-surface-base text-text-high ${isCourse ? "study-player" : ""}`}
+        className={`flex h-dvh flex-col overflow-hidden bg-surface-base text-text-high ${isCourse ? "study-player" : ""}`}
         data-study-pane={studyPane}
       >
         <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line pr-2 pl-1.5">
@@ -729,13 +736,6 @@ export function Player({
             <ThemeToggle />
           </span>
         </header>
-        {study && (
-          <CourseNavigation
-            study={study}
-            reviewed={reviewed}
-            onReviewed={() => setReviewed(!reviewed)}
-          />
-        )}
         {isCourse && (
           <div className="study-mobile-tabs" role="group" aria-label="Study pane">
             <button
@@ -868,6 +868,15 @@ export function Player({
                               label: "Steps",
                               hint: "Every step of the course (E)",
                             },
+                            ...(study
+                              ? [
+                                  {
+                                    value: "courses" as const,
+                                    label: "Courses",
+                                    hint: "Chapters and lessons",
+                                  },
+                                ]
+                              : []),
                           ]
                         : [
                             {
@@ -894,7 +903,9 @@ export function Player({
                   />
                 </div>
                 <div key={side} className="min-h-0 flex-1 overflow-auto">
-                  {side === "lesson" ? (
+                  {side === "courses" && study ? (
+                    <CourseOutline study={study} reviewed={reviewed} />
+                  ) : side === "lesson" ? (
                     <LessonPanel
                       replay={replay}
                       frames={playback.frames}
@@ -989,58 +1000,82 @@ export function Player({
               onJump={jumpToPosition}
             />
           </div>
-          {sourceCoverage ? (
-            <span
-              className="hidden shrink-0 font-mono text-2xs text-text-low xl:inline"
-              title="Current selected-file source: explained in depth versus included for completeness. Bulk imports preserve earlier explanations; they do not claim conceptual mastery. Remaining source is not yet shown."
+          <details className="study-progress-detail">
+            <summary
+              aria-label="Playback progress"
+              title="Playback and source coverage"
             >
-              Explained: {sourceCoverage.explained} · Included:{" "}
-              {sourceCoverage.included} / {sourceCoverage.total} selected lines
-            </span>
-          ) : null}
-          {coverage ? (
-            <span
-              className="hidden shrink-0 font-mono text-xs text-text-low tabular-nums md:inline"
-              title={`${coverage.files} of ${coverage.totalFiles} files exist; ${coverage.lines} of ${coverage.totalLines} lines hold their final text`}
-            >
-              {isCourse ? "Session: " : ""}
-              {percent(coverage.files, coverage.totalFiles)} files ·{" "}
-              {percent(coverage.lines, coverage.totalLines)} lines
-            </span>
-          ) : null}
-          <span className="shrink-0 font-mono text-xs text-text-low tabular-nums">
-            {position} / {visible.length}
-          </span>
-          <Select
-            value={filter}
-            onValueChange={(next) => isFilter(next) && setFilter(next)}
-          >
-            <SelectTrigger size="sm" className="w-32 shrink-0" aria-label="Steps shown">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="changes">Changes</SelectItem>
-              <SelectItem value="all">Every step</SelectItem>
-              {noted.length ? (
-                <SelectItem value="notes">Notes ({noted.length})</SelectItem>
-              ) : null}
-            </SelectContent>
-          </Select>
-          <Select
-            value={String(transport.speed)}
-            onValueChange={(next) => setSpeed(Number(next) as Speed)}
-          >
-            <SelectTrigger size="sm" className="w-20 shrink-0" aria-label="Speed">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SPEEDS.map((speed) => (
-                <SelectItem key={speed} value={String(speed)}>
-                  {speed}×
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <span className="study-step-count">
+                {position}/{visible.length}
+              </span>
+              <span className="study-session-percent">
+                {percent(position, visible.length)}
+              </span>
+            </summary>
+            <div>
+              <p>
+                Step {position} of {visible.length}
+              </p>
+              {coverage && (
+                <p>
+                  Files {percent(coverage.files, coverage.totalFiles)} · Lines{" "}
+                  {percent(coverage.lines, coverage.totalLines)}
+                </p>
+              )}
+              {sourceCoverage && (
+                <p>
+                  Selected source: {sourceCoverage.explained} explained ·{" "}
+                  {sourceCoverage.included} included / {sourceCoverage.total} lines
+                </p>
+              )}
+              <p>Playback progress does not mark a lesson reviewed.</p>
+            </div>
+          </details>
+          {study && (
+            <CourseActions
+              study={study}
+              reviewed={reviewed}
+              onReviewed={() => setReviewed(!reviewed)}
+            />
+          )}
+          {!isCourse && (
+            <>
+              <Select
+                value={filter}
+                onValueChange={(next) => isFilter(next) && setFilter(next)}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-32 shrink-0"
+                  aria-label="Steps shown"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="changes">Changes</SelectItem>
+                  <SelectItem value="all">Every step</SelectItem>
+                  {noted.length ? (
+                    <SelectItem value="notes">Notes ({noted.length})</SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
+              <Select
+                value={String(transport.speed)}
+                onValueChange={(next) => setSpeed(Number(next) as Speed)}
+              >
+                <SelectTrigger size="sm" className="w-20 shrink-0" aria-label="Speed">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SPEEDS.map((speed) => (
+                    <SelectItem key={speed} value={String(speed)}>
+                      {speed}×
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
         </footer>
       </div>
     </SourceNavigationContext.Provider>

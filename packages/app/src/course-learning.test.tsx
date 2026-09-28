@@ -68,6 +68,16 @@ it("resumes saved steps, honors explicit deep links, and marks reviewed only on 
     </ThemeProvider>,
   );
   expect(window.location.hash).toContain("at=3");
+  expect(screen.queryByRole("combobox", { name: "Speed" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("combobox", { name: "Steps shown" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Mark reviewed" }).closest("footer"),
+  ).not.toBeNull();
+  expect(
+    screen.getByRole("link", { name: "Next lesson" }).closest("footer"),
+  ).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Next explanation →" }));
   expect(window.location.hash).toContain("at=4");
   expect(readStudyProgress(key)?.reviewed).toBe(false);
@@ -80,7 +90,7 @@ it("resumes saved steps, honors explicit deep links, and marks reviewed only on 
     </ThemeProvider>,
   );
   expect(window.location.hash).toContain("at=2");
-  expect(screen.getByRole("button", { name: "✓ Reviewed" })).toHaveAttribute(
+  expect(screen.getByRole("button", { name: "Reviewed" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -166,12 +176,12 @@ it("keeps standalone course links relative and offers a return to its companion 
       <Player replay={replay} study={{ curriculum: linked, lessonId: "01" }} />
     </ThemeProvider>,
   );
-  fireEvent.click(screen.getByRole("button", { name: /Chapters/ }));
-  expect(screen.getByRole("link", { name: "Open full course map →" })).toHaveAttribute(
+  fireEvent.click(screen.getByRole("button", { name: "Courses" }));
+  expect(screen.getByRole("link", { name: "Full course map →" })).toHaveAttribute(
     "href",
     "index.html",
   );
-  expect(screen.getByRole("link", { name: "Next lesson →" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "Next lesson" })).toHaveAttribute(
     "href",
     "lesson-02.html",
   );

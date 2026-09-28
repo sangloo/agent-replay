@@ -13,7 +13,7 @@ import { Input } from "@/ui";
 export function CourseLibrary({ courseKey }: { courseKey?: string }) {
   const catalog = useLoad("curricula", api.curricula);
   return (
-    <div className="study-library min-h-dvh bg-surface-base text-text-high">
+    <div className="study-library h-dvh bg-surface-base text-text-high">
       <a href="#study-content" className="study-skip">
         Skip to lessons
       </a>
@@ -253,7 +253,11 @@ export function CourseMap({
                         )}
                         <p>{l.goal}</p>
                         <div className="study-lesson-meta">
-                          <span>
+                          <span
+                            className={
+                              saved?.reviewed ? "study-reviewed-label" : undefined
+                            }
+                          >
                             {!href
                               ? "Replay unavailable"
                               : saved?.reviewed
@@ -309,7 +313,7 @@ export function StandaloneCourseLibrary({
   exportBase: string;
 }) {
   return (
-    <div className="study-library min-h-dvh bg-surface-base text-text-high">
+    <div className="study-library h-dvh bg-surface-base text-text-high">
       <a href="#study-content" className="study-skip">
         Skip to lessons
       </a>
