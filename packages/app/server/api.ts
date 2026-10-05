@@ -1,4 +1,3 @@
-import { sessionStreamer } from "./session-stream.ts";
 /**
  * The local service: a Vite plugin, so `pnpm dev:replay` is the whole tool —
  * no second process to start, no port to agree on, and it only ever listens
@@ -38,12 +37,12 @@ import { basename } from "node:path";
 import {
   curriculumLessons,
   type Replay,
+  type ReplayRepo,
   type StudyCatalog,
   type StudyContext,
 } from "@agent-replay/core";
 import type { Plugin } from "vite";
 
-import { captureSession, type Captured } from "./capture.ts";
 import { readStudyCourse } from "./curriculum.ts";
 import { exportHtml, hasPlayer } from "./export.ts";
 import * as git from "./git.ts";
@@ -56,6 +55,11 @@ import {
   rootOf,
   type FolderListing,
 } from "./projects.ts";
+import {
+  sessionStreamer,
+  type CapturedPlace,
+  type WholeCapture,
+} from "./session-stream.ts";
 import { findSession, listSessions } from "./sessions.ts";
 import {
   findSaved,
@@ -270,7 +274,6 @@ export function createHandler(options: ReplayApiOptions) {
   // Real paths, as git reports a capture's root — so a symlinked or
   // non-top-level entry still finds the replays saved there.
   const configured = options.repos.map(real);
-  const streamSession = sessionStreamer(configured);
 
   // Every repository the player knows: the ones it was started for, the
   // ones added by hand, and every one a session ran in. A saved replay's id
@@ -296,43 +299,46 @@ export function createHandler(options: ReplayApiOptions) {
     return name ? savedId(root, name) : undefined;
   };
 
-  // A live capture reads git for every touched file; a session is only
-  // re-captured when its transcript has moved on.
-  const live = new Map<string, { updatedAt: string; captured: Captured }>();
-
-  /** A session's repository: from the capture already made, when there is one. */
-  const liveRoot = (id: string): Captured => live.get(id)?.captured ?? liveCapture(id);
-
-  const liveCapture = (id: string): Captured => {
-    const session = findSession(id, undefined, { exact: true });
-    if (!session)
-      throw new Problem(404, "not_found", `No session ${id} on this machine.`);
-    const cached = live.get(id);
-    if (cached && cached.updatedAt === session.updatedAt) return cached.captured;
-    try {
-      const captured = captureSession({ session }, knownRoots());
-      // The few most recent, not every session ever opened: a capture holds
-      // a copy of every file the session touched.
-      live.delete(id);
-      live.set(id, { updatedAt: session.updatedAt, captured });
-      for (const key of live.keys()) {
-        if (live.size <= 6) break;
-        live.delete(key);
+  // Where each live session's repository is, learned from its capture — so
+  // its other files are answered without capturing it again.
+  const places = new Map<string, CapturedPlace>();
+  const streamSession = sessionStreamer(configured, {
+    onCaptured: (id, place) => {
+      places.delete(id);
+      places.set(id, place);
+      for (const key of places.keys()) {
+        if (places.size <= 64) break;
+        places.delete(key);
       }
-      return captured;
+    },
+  });
+
+  /** A live session captured whole, in the worker — never on this event loop. */
+  const liveCapture = async (id: string): Promise<WholeCapture> => {
+    if (!findSession(id, undefined, { exact: true }))
+      throw new Problem(404, "not_found", `No session ${id} on this machine.`);
+    try {
+      return await streamSession.capture(id);
     } catch (error) {
-      throw new Problem(
-        422,
-        "validation_failed",
-        error instanceof Error ? error.message : String(error),
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      throw /already loading/.test(message)
+        ? new Problem(503, "busy", message)
+        : new Problem(422, "validation_failed", message);
     }
+  };
+
+  /** A session's repository: from its capture when it has been opened. */
+  const liveRoot = async (id: string): Promise<CapturedPlace> => {
+    const place = places.get(id);
+    if (place) return place;
+    const { root, replay } = await liveCapture(id);
+    return { root, repo: replay.repo };
   };
 
   // Every file at a commit, kept: a tree is asked for once per replay opened.
   const trees = new Map<string, RepoTree>();
-  const treeAt = (root: string, replay: Replay): RepoTree => {
-    const rev = [replay.repo.base, replay.repo.end]
+  const treeAt = (root: string, repo: ReplayRepo): RepoTree => {
+    const rev = [repo.base, repo.end]
       .map((candidate) => candidate && git.resolve(root, candidate))
       .find(Boolean);
     if (!rev) {
@@ -404,7 +410,7 @@ export function createHandler(options: ReplayApiOptions) {
     match: RegExpMatchArray,
     query: URLSearchParams,
     body: unknown,
-  ) => unknown;
+  ) => unknown | Promise<unknown>;
   const REPLAY = String.raw`\/replays\/([0-9a-f]{8}):([\w.-]+)`;
   const SESSION = String.raw`\/sessions\/([\w.:-]+)`;
   const routes: [string, RegExp, Handler][] = [
@@ -525,7 +531,7 @@ export function createHandler(options: ReplayApiOptions) {
       new RegExp(`^${REPLAY}\\/tree$`),
       (match): RepoTree => {
         const { root, replay } = saved(match[1]!, match[2]!);
-        return treeAt(root, replay);
+        return treeAt(root, replay.repo);
       },
     ],
     [
@@ -568,8 +574,8 @@ export function createHandler(options: ReplayApiOptions) {
     [
       "GET",
       new RegExp(`^${SESSION}$`),
-      (match): LiveReplay => {
-        const { replay, root, warnings } = liveCapture(match[1]!);
+      async (match): Promise<LiveReplay> => {
+        const { replay, root, warnings } = await liveCapture(match[1]!);
         return {
           replay,
           repo: basename(root),
@@ -581,22 +587,25 @@ export function createHandler(options: ReplayApiOptions) {
     [
       "GET",
       new RegExp(`^${SESSION}\\/tree$`),
-      (match): RepoTree => {
-        const { replay, root } = liveRoot(match[1]!);
-        return treeAt(root, replay);
+      async (match): Promise<RepoTree> => {
+        const { root, repo } = await liveRoot(match[1]!);
+        return treeAt(root, repo);
       },
     ],
     [
       "GET",
       new RegExp(`^${SESSION}\\/file$`),
-      (match, query): RepoFile => fileAt(liveRoot(match[1]!).root, query),
+      async (match, query): Promise<RepoFile> =>
+        fileAt((await liveRoot(match[1]!)).root, query),
     ],
     [
       "POST",
       new RegExp(`^${SESSION}\\/save$`),
-      (match): { id?: string; file: string } => {
-        const { replay, root } = liveCapture(match[1]!);
+      async (match): Promise<{ id?: string; file: string }> => {
+        const { replay, root } = await liveCapture(match[1]!);
         const file = saveReplay(root, replay);
+        // Reopened, the session should say it now has a saved copy.
+        streamSession.forget(match[1]!);
         return { id: savedIdIn(root, replay.id), file };
       },
     ],
@@ -668,7 +677,7 @@ export function createHandler(options: ReplayApiOptions) {
       try {
         const savedReplay =
           exporting.length === 3 ? saved(exporting[1]!, exporting[2]!) : undefined;
-        const replay = savedReplay?.replay ?? liveCapture(exporting[1]!).replay;
+        const replay = savedReplay?.replay ?? (await liveCapture(exporting[1]!)).replay;
         let study: StudyContext | undefined;
         let exportFile: string | undefined;
         if (savedReplay && replay.source === "course") {
@@ -750,7 +759,7 @@ export function createHandler(options: ReplayApiOptions) {
 
     try {
       const body = request.method === "GET" ? undefined : await readBody(request);
-      const data = route[2](path.match(route[1])!, query, body);
+      const data = await route[2](path.match(route[1])!, query, body);
       send(response, requestId, 200, { data, meta: { request_id: requestId } });
     } catch (error) {
       problem(

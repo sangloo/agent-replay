@@ -1,4 +1,13 @@
-/** Isolate transcript parsing and synchronous git work from the HTTP event loop. */
+/**
+ * Isolate transcript parsing and synchronous git work from the HTTP event loop.
+ *
+ * Two jobs, by `workerData.mode`:
+ * - `stream` (the default): NDJSON lines for the player, each acknowledged
+ *   before the next so the HTTP response's backpressure reaches the capture;
+ *   and, once captured, where the session's repository is — so the service
+ *   can answer for its files without capturing it again.
+ * - `replay`: the whole capture, posted once — for saving and exporting.
+ */
 import { parentPort, workerData } from "node:worker_threads";
 import { captureSession } from "./capture.ts";
 import { findSession } from "./sessions.ts";
@@ -9,7 +18,8 @@ const emit = (event: unknown) =>
     parentPort!.once("message", () => resolve());
     parentPort!.postMessage({ line: JSON.stringify(event) + "\n", acknowledge: true });
   });
-try {
+
+async function stream() {
   const session = findSession(workerData.id, undefined, { exact: true });
   if (!session) throw new Error("Session not found on this machine.");
   await emit({
@@ -31,6 +41,7 @@ try {
     workerData.repos,
   );
   const { steps, files, ...header } = replay;
+  parentPort!.postMessage({ captured: { root, repo: replay.repo } });
   const name = findSaved(root, replay.id);
   await emit({
     kind: "header",
@@ -60,9 +71,20 @@ try {
   await batches("files", Object.entries(files));
   await batches("steps", steps);
   await emit({ kind: "done" });
+}
+
+function whole() {
+  const session = findSession(workerData.id, undefined, { exact: true });
+  if (!session) throw new Error(`No session ${workerData.id} on this machine.`);
+  const captured = captureSession({ session }, workerData.repos);
+  parentPort!.postMessage({ result: captured });
+}
+
+try {
+  if (workerData.mode === "replay") whole();
+  else await stream();
 } catch (error) {
-  await emit({
-    kind: "error",
-    message: error instanceof Error ? error.message : String(error),
-  });
+  const message = error instanceof Error ? error.message : String(error);
+  if (workerData.mode === "replay") parentPort!.postMessage({ error: message });
+  else await emit({ kind: "error", message });
 }
