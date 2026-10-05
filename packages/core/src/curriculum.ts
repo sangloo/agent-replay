@@ -33,6 +33,8 @@ export interface StudyCourse {
   key: string;
   curriculum: Curriculum;
   unavailable: string[];
+  /** Steps in each available lesson's replay, by lesson id — for "how far along". */
+  steps?: Record<string, number>;
 }
 
 export interface StudyCatalog {

@@ -23,14 +23,17 @@ export function readStudyCourse(root: string): StudyCourse | undefined {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
-  const saved = new Set(
-    listSaved(root)
-      .filter((item) => item.agent === "course")
-      .map((item) => item.name),
-  );
+  const courses = listSaved(root).filter((item) => item.agent === "course");
+  const saved = new Set(courses.map((item) => item.name));
+  const steps = Object.fromEntries(courses.map((item) => [item.name, item.steps]));
   return {
     key: idKey(root),
     curriculum,
+    steps: Object.fromEntries(
+      curriculumLessons(curriculum)
+        .filter((lesson) => steps[lesson.replay] !== undefined)
+        .map((lesson) => [lesson.id, steps[lesson.replay]!]),
+    ),
     unavailable: curriculumLessons(curriculum)
       .filter((lesson) => !saved.has(lesson.replay))
       .map((lesson) => lesson.id),

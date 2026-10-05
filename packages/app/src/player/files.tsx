@@ -4,6 +4,7 @@ import { ChevronsDownUp, File, Folder, FolderOpen } from "lucide-react";
 import * as React from "react";
 
 import { Choice } from "../choice";
+import { isBoolean, usePersistent } from "../persist";
 import { fileName } from "../labels";
 import { ancestorIds, DIR_ID, FILE_ID, treeLines } from "./tree-lines";
 
@@ -100,7 +101,20 @@ export function FilesPanel({
   const [scope, setScope] = React.useState<"changes" | "all">("changes");
   const [query, setQuery] = React.useState("");
   const [collapse, setCollapse] = React.useState(0);
+  // Files the replay changes later are a preview of where it goes, not what
+  // has happened: hidden until asked for, so the list is what changed so far.
+  const [upcoming, setUpcoming] = usePersistent("files-upcoming", false, isBoolean);
   const changed = files.filter((file) => file.touched && !file.absent).length;
+  const ahead = files.length - changed;
+  const listed = React.useMemo(
+    () =>
+      scope === "all" || upcoming
+        ? files
+        : files.filter(
+            (file) => (file.touched && !file.absent) || file.path === current,
+          ),
+    [files, scope, upcoming, current],
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -123,6 +137,7 @@ export function FilesPanel({
                   </span>
                 </>
               ),
+              hint: `${changed} of the ${files.length} files this replay changes, so far`,
             },
             ...(onWantRepo ? [{ value: "all" as const, label: "All files" }] : []),
           ]}
@@ -162,7 +177,7 @@ export function FilesPanel({
           <p className="px-4 py-2 text-xs text-text-mid">{repoState.failed}</p>
         ) : (
           <FileTree
-            files={files}
+            files={listed}
             repo={scope === "all" ? repo : undefined}
             current={current}
             active={active}
@@ -172,6 +187,17 @@ export function FilesPanel({
           />
         )}
       </div>
+      {scope === "changes" && ahead > 0 ? (
+        <button
+          type="button"
+          onClick={() => setUpcoming(!upcoming)}
+          className="shrink-0 border-t border-line px-4 py-2 text-left text-2xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
+        >
+          {upcoming
+            ? "Hide the files changed later"
+            : `Show ${ahead} file${ahead === 1 ? "" : "s"} changed later`}
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -10,7 +10,7 @@ export interface ScrubStep {
 }
 
 const MARK: Record<Tone, string> = {
-  prompt: "h-3 w-0.5 rounded-full bg-text-low",
+  prompt: "h-2.5 w-px bg-line-control",
   commit: "h-3 w-0.5 rounded-full bg-info",
   note: "size-1.5 rounded-full bg-warning",
   pass: "size-1.5 rounded-full bg-success",

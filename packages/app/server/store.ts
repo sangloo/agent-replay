@@ -35,6 +35,8 @@ export interface SavedReplay {
   notes: number;
   /** A course's lessons; absent on anything else. */
   lessons?: number;
+  /** The revision its steps arrive at: a course's target, else the end commit. */
+  revision?: string;
 }
 
 function slug(text: string): string {
@@ -146,6 +148,9 @@ function summarize(root: string, name: string): SavedReplay | undefined {
     steps: replay.steps.length,
     changes: replay.steps.filter(isChange).length,
     notes: Object.keys(replay.notes).length,
+    ...((replay.course?.rev ?? replay.repo.end)
+      ? { revision: replay.course?.rev ?? replay.repo.end }
+      : {}),
     ...(replay.source === "course"
       ? { lessons: replay.steps.filter((step) => step.kind === "lesson").length }
       : {}),

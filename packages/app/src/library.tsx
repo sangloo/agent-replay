@@ -9,11 +9,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/ui";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import * as React from "react";
 
 import {
   api,
+  rememberTitle,
   useLoad,
   type ApiResult,
   type Page,
@@ -21,12 +22,12 @@ import {
   type SavedListing,
   type SessionListing,
 } from "./api";
-import { Choice } from "./choice";
+import { AppHeader } from "./app-header";
 import { FolderDialog } from "./folder-dialog";
-import { ago, dayGroup, project as folderName } from "./labels";
-import { PAGE_SIZE, type LibraryParams, type Tab } from "./library-params";
+import { ago, dayGroup, project as folderName, size } from "./labels";
+import { libraryHash, PAGE_SIZE, type LibraryParams } from "./library-params";
 import { ProjectPicker } from "./project-picker";
-import { ThemeToggle } from "./theme-toggle";
+import { fractionOf, listedProgress, type StudyProgress } from "./study-progress";
 
 interface Item {
   id: string;
@@ -38,6 +39,51 @@ interface Item {
   at?: string;
   when: string;
   badge?: React.ReactNode;
+  /** How far the reader got, last time it was open here. */
+  progress?: { fraction: number; done: boolean };
+  /** The pointer rests on it, or focus arrives: it may well be opened next. */
+  onIntent?: () => void;
+}
+
+function progressOf(
+  saved: StudyProgress | undefined,
+  total: number,
+  course: boolean,
+): Item["progress"] {
+  if (!saved || (saved.cursor === 0 && !saved.reviewed)) return undefined;
+  const fraction = fractionOf(saved, total || undefined);
+  return { fraction, done: course ? saved.reviewed || fraction >= 1 : fraction >= 1 };
+}
+
+/** How far along, as a short bar and a word: read at a glance down a list. */
+export function ProgressMark({
+  progress,
+}: {
+  progress: NonNullable<Item["progress"]>;
+}) {
+  if (progress.done) {
+    return (
+      <span className="flex shrink-0 items-center gap-1 text-2xs font-medium text-success-ink">
+        <Check aria-hidden className="size-3.5" />
+        Done
+      </span>
+    );
+  }
+  const shown = Math.max(1, Math.round(progress.fraction * 100));
+  return (
+    <span
+      className="flex shrink-0 items-center gap-2 text-2xs text-text-low tabular-nums"
+      title={`${shown}% of the way through, last time`}
+    >
+      <span aria-hidden className="h-1 w-14 overflow-hidden rounded-full bg-line-high">
+        <span
+          className="block h-full rounded-full bg-emphasis"
+          style={{ width: `${shown}%` }}
+        />
+      </span>
+      {shown}%
+    </span>
+  );
 }
 
 interface PageState<T> {
@@ -83,8 +129,24 @@ function usePage<T>(
   };
 }
 
+/** A row that holds the pointer for a moment is probably about to be opened. */
+function useIntent() {
+  const timer = React.useRef<ReturnType<typeof setTimeout>>(undefined);
+  return React.useMemo(
+    () => ({
+      start: (item: Item) => {
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => item.onIntent?.(), 200);
+      },
+      stop: () => clearTimeout(timer.current),
+    }),
+    [],
+  );
+}
+
 function Rows({ items }: { items: readonly Item[] }) {
   const list = React.useRef<HTMLDivElement>(null);
+  const intent = useIntent();
   // ↑ and ↓ move between rows; Enter opens one (it is a link).
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -115,6 +177,10 @@ function Rows({ items }: { items: readonly Item[] }) {
                 <a
                   data-row
                   href={item.href}
+                  onPointerEnter={item.onIntent ? () => intent.start(item) : undefined}
+                  onPointerLeave={intent.stop}
+                  onFocus={item.onIntent ? () => intent.start(item) : undefined}
+                  onClick={() => rememberTitle(item.id, item.title)}
                   className="flex items-center gap-4 rounded-control px-3 py-2.5 focus-bar hover:bg-hover"
                 >
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -123,6 +189,7 @@ function Rows({ items }: { items: readonly Item[] }) {
                     </span>
                     <span className="truncate text-xs text-text-low">{item.meta}</span>
                   </span>
+                  {item.progress ? <ProgressMark progress={item.progress} /> : null}
                   {item.badge ?? null}
                   <span className="w-16 shrink-0 text-right text-xs text-text-low tabular-nums">
                     {item.when}
@@ -177,7 +244,13 @@ export function Library({
           id: item.id,
           href: `#/session/${encodeURIComponent(item.id)}`,
           title: item.title,
-          meta: [agentName(item.agent), project ? "" : nameOf(item.project ?? item.cwd)]
+          meta: [
+            agentName(item.agent),
+            project ? "" : nameOf(item.project ?? item.cwd),
+            item.bytes > 8 * 1024 * 1024
+              ? `long session · ${size(item.bytes)} log`
+              : "",
+          ]
             .filter(Boolean)
             .join(" · "),
           at: item.updatedAt,
@@ -185,6 +258,8 @@ export function Library({
           badge: item.saved ? (
             <span className="shrink-0 text-2xs text-text-low">Saved</span>
           ) : undefined,
+          progress: progressOf(listedProgress(item), 0, false),
+          onIntent: () => api.prefetchSession(item.id),
         })) ?? [])
       : (saved.page?.items.map((item: SavedListing): Item => ({
           id: item.id,
@@ -206,6 +281,11 @@ export function Library({
               {item.notes} {item.notes === 1 ? "note" : "notes"}
             </span>
           ) : undefined,
+          progress: progressOf(
+            listedProgress(item),
+            item.steps,
+            item.agent === "course",
+          ),
         })) ?? []);
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
   const agents = Object.entries(data?.agents ?? {}).sort((a, b) => b[1] - a[1]);
@@ -241,37 +321,23 @@ export function Library({
   return (
     <div className="min-h-dvh bg-surface-base text-text-high">
       <div className="sticky top-0 z-raised bg-surface-base">
-        <header className="flex h-12 items-center gap-3 border-b border-line px-3">
-          <span className="px-1 text-sm font-medium">Replay</span>
-          <span aria-hidden className="text-text-low">
-            /
-          </span>
-          <ProjectPicker
-            projects={known}
-            value={project}
-            onChange={(root) => onParams({ ...params, project: root, page: 1 })}
-            onOpenFolder={() => setOpening(true)}
-          />
-          <a
-            href="#/learn"
-            className="ml-auto rounded-control px-3 py-1 text-sm font-medium focus-bar hover:bg-hover"
-          >
-            Learn / Chapters
-          </a>
-          <span>
-            <ThemeToggle />
-          </span>
-        </header>
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-6 pt-6 pb-4">
-          <Choice<Tab>
-            label="Which replays"
-            value={tab}
-            onChange={(next) => onParams({ ...params, tab: next, agent: "", page: 1 })}
-            options={[
-              { value: "sessions", label: "Sessions" },
-              { value: "saved", label: "Saved" },
-            ]}
-          />
+        <AppHeader
+          place={tab}
+          hrefOf={(place) =>
+            place === "learn"
+              ? "#/learn"
+              : libraryHash({ ...params, tab: place, agent: "", q: "", page: 1 })
+          }
+          picker={
+            <ProjectPicker
+              projects={known}
+              value={project}
+              onChange={(root) => onParams({ ...params, project: root, page: 1 })}
+              onOpenFolder={() => setOpening(true)}
+            />
+          }
+        />
+        <div className="mx-auto flex max-w-4xl items-center gap-3 px-6 pt-6 pb-3">
           <div className="relative min-w-40 flex-1">
             <Search
               aria-hidden
@@ -319,14 +385,14 @@ export function Library({
             </SelectContent>
           </Select>
         </div>
-      </div>
-
-      <main className="mx-auto flex max-w-4xl flex-col gap-6 px-3 pb-24">
-        <p className="-mt-2 px-3 text-xs text-text-low">
+        <p className="mx-auto max-w-4xl px-6 pb-3 text-xs text-text-low">
           {tab === "sessions"
             ? "Agent sessions on this machine — Claude Code, Codex and Gemini CLI. Each is read live when you open it."
             : "Replays and courses saved into a repository’s .replays/ folder — with their notes, ready to share."}
         </p>
+      </div>
+
+      <main className="mx-auto flex max-w-4xl flex-col gap-6 px-3 pt-3 pb-24">
         <div
           className={cn(
             "px-3 transition-opacity duration-fast",

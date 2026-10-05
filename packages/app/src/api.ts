@@ -114,6 +114,32 @@ async function call<T>(
 const sourcePath = ({ kind, id }: ReplaySource) =>
   `/api/${kind}/${encodeURIComponent(id)}`;
 
+/**
+ * A live session is read in full when it is opened — the slow part of
+ * opening one. The library starts that read when a row is hovered or
+ * focused, so by the click it is often done; the player then takes the
+ * answer already on its way rather than asking again.
+ */
+const early = new Map<string, { at: number; answer: Promise<ApiResult<LiveReplay>> }>();
+const EARLY_FOR = 60_000;
+
+function session(id: string): Promise<ApiResult<LiveReplay>> {
+  const started = early.get(id);
+  early.delete(id);
+  if (started && Date.now() - started.at < EARLY_FOR) return started.answer;
+  return call<LiveReplay>(
+    "GET",
+    `/api/sessions/${encodeURIComponent(id)}`,
+    undefined,
+    "slow",
+  );
+}
+
+/** Titles the lists have shown, so a replay that is still loading can be named. */
+const titles = new Map<string, string>();
+export const rememberTitle = (id: string, title: string) => titles.set(id, title);
+export const knownTitle = (id: string) => titles.get(id);
+
 export const api = {
   curricula: () => call<StudyCatalog>("GET", "/api/curricula"),
   projects: () => call<Project[]>("GET", "/api/projects"),
@@ -141,13 +167,26 @@ export const api = {
       "GET",
       `${sourcePath(source)}/file?${new URLSearchParams({ rev, path })}`,
     ),
-  session: (id: string) =>
-    call<LiveReplay>(
-      "GET",
-      `/api/sessions/${encodeURIComponent(id)}`,
-      undefined,
-      "slow",
-    ),
+  session,
+  /** Start reading a session now, for a click that is probably coming. */
+  prefetchSession: (id: string) => {
+    if (early.has(id)) return;
+    // An answer nobody opened is let go: it can hold a whole session.
+    for (const [key, { at }] of early)
+      if (Date.now() - at >= EARLY_FOR) early.delete(key);
+    // One at a time: the service reads a session in one go, and a pointer
+    // sweeping down the list should not queue a dozen.
+    for (const { at } of early.values()) if (Date.now() - at < 5_000) return;
+    early.set(id, {
+      at: Date.now(),
+      answer: call<LiveReplay>(
+        "GET",
+        `/api/sessions/${encodeURIComponent(id)}`,
+        undefined,
+        "slow",
+      ),
+    });
+  },
   save: (id: string) =>
     call<{ id?: string; file: string }>(
       "POST",

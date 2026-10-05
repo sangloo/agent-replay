@@ -4,12 +4,12 @@ import {
   type StudyContext,
   type Replay,
 } from "@agent-replay/core";
-import { LoaderCircle } from "lucide-react";
+import { ArrowLeft, LoaderCircle } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/ui";
 
-import { api, useLoad } from "./api";
+import { api, knownTitle, useLoad } from "./api";
 import { Library } from "./library";
 import { CourseLibrary, StandaloneCourseLibrary } from "./course-library";
 import { libraryHash, parseLibrary, type LibraryParams } from "./library-params";
@@ -48,17 +48,32 @@ function useRoute(): Route {
   return parse(hash);
 }
 
-// Where the list was — the tab, the search, the page — so Back returns there.
-let lastLibrary = "#/";
+// Where the reader was before opening a replay — a tab of the library with
+// its search and page, or Learn — so Back returns there, and says so.
+let lastPlace: { hash: string; label: string } | undefined;
 
-const back = () => {
-  window.location.hash = lastLibrary;
-};
+/** Back from a replay: where the reader came from, or the list it belongs in. */
+function backTo(fallback: { hash: string; label: string }) {
+  const place = lastPlace ?? fallback;
+  return {
+    label: place.label,
+    go: () => {
+      window.location.hash = place.hash;
+    },
+  };
+}
+
+const SESSIONS = { hash: "#/", label: "Sessions" };
+const SAVED = { hash: "#/?tab=saved", label: "Saved" };
+const LEARN = { hash: "#/learn", label: "Learn" };
+
+const back = () => backTo(SESSIONS).go();
 
 // Typing in the search replaces the URL rather than adding to history.
 const setLibrary = (params: LibraryParams) => {
-  lastLibrary = libraryHash(params);
-  window.history.replaceState(null, "", lastLibrary);
+  const hash = libraryHash(params);
+  lastPlace = { hash, label: params.tab === "saved" ? "Saved" : "Sessions" };
+  window.history.replaceState(null, "", hash);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 };
 
@@ -70,33 +85,101 @@ function Status({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Waiting, said plainly: what is happening, for how long so far, and — once
- * it has been a while — why, so a long first capture never looks stuck.
- */
-function Loading({ what }: { what: string }) {
+/** Seconds since it appeared, for a wait that should say how long it has been. */
+function useSeconds() {
   const [seconds, setSeconds] = React.useState(0);
   React.useEffect(() => {
     const timer = setInterval(() => setSeconds((n) => n + 1), 1000);
     return () => clearInterval(timer);
   }, []);
+  return seconds;
+}
+
+/**
+ * The player's shape while a replay is read: its title, the way back, and
+ * where the code will be — so opening a replay is a page arriving, not a
+ * blank screen with a spinner.
+ */
+function PlayerSkeleton({
+  title,
+  what,
+  backLabel,
+  onBack,
+}: {
+  title?: string;
+  what: string;
+  backLabel: string;
+  onBack: () => void;
+}) {
+  const seconds = useSeconds();
+  const widths = [62, 48, 71, 35, 80, 54, 66, 28, 74, 45, 58, 39, 69, 51];
   return (
-    <Status>
-      <div className="flex max-w-md flex-col items-center gap-2 text-center">
-        <span className="flex items-center gap-2 text-text-high">
-          <LoaderCircle aria-hidden className="size-4 animate-spin text-text-low" />
-          {what}
-        </span>
-        {seconds >= 3 ? (
-          <span className="text-xs text-text-low tabular-nums">
-            {seconds} s
-            {seconds >= 8
-              ? " — a long session is read in full the first time; opening it again is instant."
-              : ""}
-          </span>
-        ) : null}
+    <div className="flex h-dvh flex-col overflow-hidden bg-surface-base text-text-high">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex h-8 items-center gap-1.5 rounded-control px-2 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-4"
+        >
+          <ArrowLeft aria-hidden />
+          {backLabel}
+        </button>
+        <span aria-hidden className="h-5 w-px bg-line" />
+        {title ? (
+          <h1 className="min-w-0 truncate text-sm font-medium">{title}</h1>
+        ) : (
+          <span className="h-3.5 w-64 animate-pulse rounded-full bg-surface-mid" />
+        )}
+      </header>
+      <div className="flex min-h-0 flex-1">
+        <div className="hidden w-64 shrink-0 flex-col gap-3 border-r border-line bg-surface-low p-4 md:flex">
+          {widths.slice(0, 9).map((w, i) => (
+            <span
+              key={i}
+              className="h-2.5 animate-pulse rounded-full bg-surface-mid"
+              style={{ width: `${w}%` }}
+            />
+          ))}
+        </div>
+        <main className="flex min-w-0 flex-1 flex-col">
+          <div
+            role="status"
+            className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-4 text-xs text-text-mid"
+          >
+            <LoaderCircle aria-hidden className="size-3.5 animate-spin text-text-low" />
+            {what}
+            {seconds >= 2 ? (
+              <span className="text-text-low tabular-nums">· {seconds} s</span>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-3 px-8 py-6">
+            {widths.map((w, i) => (
+              <span
+                key={i}
+                className="h-2.5 animate-pulse rounded-full bg-surface-mid"
+                style={{ width: `${w * 0.8}%`, animationDelay: `${i * 60}ms` }}
+              />
+            ))}
+            {seconds >= 6 ? (
+              <p className="mt-4 max-w-prose text-xs text-text-low">
+                A long session is read in full the first time it is opened, and compared
+                with the repository; opening it again is quick.
+              </p>
+            ) : null}
+          </div>
+        </main>
+        <div className="hidden w-80 shrink-0 flex-col gap-3 border-l border-line bg-surface-low p-4 lg:flex">
+          {widths.slice(3, 12).map((w, i) => (
+            <span
+              key={i}
+              className="h-2.5 animate-pulse rounded-full bg-surface-mid"
+              style={{ width: `${w}%` }}
+            />
+          ))}
+        </div>
       </div>
-    </Status>
+      <footer className="h-14 shrink-0 border-t border-line" />
+    </div>
   );
 }
 
@@ -114,7 +197,7 @@ function Failed({ message }: { message: string }) {
             Try again
           </Button>
           <Button variant="ghost" size="sm" onClick={back}>
-            All replays
+            Back
           </Button>
         </div>
       </div>
@@ -161,10 +244,20 @@ function SavedReplay({ id, at }: { id: string; at?: number }) {
   const [replay, setReplay] = React.useState<{ data: Replay; at?: number }>();
   const shown = replay?.data ?? (loaded.state === "ready" ? loaded.data : undefined);
   const newer = useNewerCourse(id, shown);
-  if (loaded.state === "loading") return <Loading what="Opening the replay…" />;
+  const fallback = backTo(shown?.source === "course" ? LEARN : SAVED);
+  if (
+    loaded.state === "loading" ||
+    (shown?.source === "course" && catalog.state === "loading")
+  )
+    return (
+      <PlayerSkeleton
+        title={knownTitle(id)}
+        what="Opening the replay…"
+        backLabel={fallback.label}
+        onBack={fallback.go}
+      />
+    );
   if (loaded.state === "failed") return <Failed message={loaded.message} />;
-  if (shown?.source === "course" && catalog.state === "loading")
-    return <Loading what="Opening the course map…" />;
   const course =
     catalog.state === "ready"
       ? catalog.data.courses.find((c) =>
@@ -190,8 +283,9 @@ function SavedReplay({ id, at }: { id: string; at?: number }) {
           ? () => {
               window.location.hash = `#/learn/${study.key}`;
             }
-          : back
+          : fallback.go
       }
+      backLabel={study ? "Course map" : fallback.label}
       notice={
         newer ? (
           <>
@@ -216,8 +310,16 @@ function LiveSession({ id, at }: { id: string; at?: number }) {
   const source = React.useMemo(() => ({ kind: "sessions" as const, id }), [id]);
   const [saving, setSaving] = React.useState(false);
   const [outcome, setOutcome] = React.useState<string>();
+  const fallback = backTo(SESSIONS);
   if (loaded.state === "loading")
-    return <Loading what="Reading the session and the repository…" />;
+    return (
+      <PlayerSkeleton
+        title={knownTitle(id)}
+        what="Reading the session and the repository…"
+        backLabel={fallback.label}
+        onBack={fallback.go}
+      />
+    );
   if (loaded.state === "failed") return <Failed message={loaded.message} />;
   const { replay, repo, warnings, saved } = loaded.data;
   const save = async () => {
@@ -244,7 +346,8 @@ function LiveSession({ id, at }: { id: string; at?: number }) {
       onSave={() => void save()}
       saved={Boolean(saved)}
       saving={saving}
-      onBack={back}
+      onBack={fallback.go}
+      backLabel={fallback.label}
     />
   );
 }
@@ -252,9 +355,18 @@ function LiveSession({ id, at }: { id: string; at?: number }) {
 function LibraryRoute({ params }: { params: LibraryParams }) {
   const hash = libraryHash(params);
   React.useEffect(() => {
-    lastLibrary = hash;
-  }, [hash]);
+    lastPlace = { hash, label: params.tab === "saved" ? "Saved" : "Sessions" };
+  }, [hash, params.tab]);
   return <Library params={params} onParams={setLibrary} />;
+}
+
+function LearnRoute({ courseKey }: { courseKey?: string }) {
+  React.useEffect(() => {
+    lastPlace = courseKey
+      ? { hash: `#/learn/${courseKey}`, label: "Course map" }
+      : LEARN;
+  }, [courseKey]);
+  return <CourseLibrary courseKey={courseKey} />;
 }
 
 /**
@@ -324,7 +436,7 @@ export function App() {
 
 function Routed() {
   const route = useRoute();
-  if (route.page === "learn") return <CourseLibrary courseKey={route.key} />;
+  if (route.page === "learn") return <LearnRoute courseKey={route.key} />;
   if (route.page === "replay")
     return <SavedReplay key={route.id} id={route.id} at={route.at} />;
   if (route.page === "session")

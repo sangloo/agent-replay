@@ -67,6 +67,10 @@ export interface ReplayApiOptions {
 
 export interface SavedListing {
   id: string;
+  /** The replay's own id (the session's), which progress in the player is kept by. */
+  replayId: string;
+  /** The revision its steps arrive at, which a course's progress is kept by. */
+  revision?: string;
   /** The repository's name, and its root. */
   repo: string;
   project: string;
@@ -476,6 +480,7 @@ export function createHandler(options: ReplayApiOptions) {
             .flatMap((root) =>
               listSaved(root).map(({ name, file: _file, ...saved }) => ({
                 ...saved,
+                replayId: saved.id,
                 id: savedId(root, name),
                 repo: projectName(root),
                 project: root,

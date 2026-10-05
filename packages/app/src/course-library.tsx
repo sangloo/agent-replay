@@ -1,134 +1,369 @@
 import {
   curriculumLessons,
   studyHref,
-  type StudyCourse,
   type Curriculum,
+  type CurriculumLesson,
+  type StudyCourse,
 } from "@agent-replay/core";
+import { cn, Input } from "@/ui";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Check,
+  Circle,
+  CircleDashed,
+  GraduationCap,
+  Lock,
+  Search,
+} from "lucide-react";
 import * as React from "react";
-import { api, useLoad } from "./api";
-import { courseProgress } from "./study-progress";
-import { ThemeToggle } from "./theme-toggle";
-import { Input } from "@/ui";
 
+import { api, rememberTitle, useLoad, type SavedListing } from "./api";
+import { AppHeader } from "./app-header";
+import { ago } from "./labels";
+import { ProgressMark } from "./library";
+import {
+  courseProgress,
+  fractionOf,
+  furthestOf,
+  listedProgress,
+  type StudyProgress,
+} from "./study-progress";
+import { ThemeToggle } from "./theme-toggle";
+
+const loadCourses = () => api.replays("agent=course&limit=100");
+
+/**
+ * Learn: every course on this machine and how far along each one is — the
+ * same place as Sessions and Saved, one tab over, not a separate tool.
+ */
 export function CourseLibrary({ courseKey }: { courseKey?: string }) {
   const catalog = useLoad("curricula", api.curricula);
+  const courses = useLoad("courses", loadCourses);
+  const course =
+    courseKey && catalog.state === "ready"
+      ? catalog.data.courses.find((c) => c.key === courseKey)
+      : undefined;
   return (
-    <div className="study-library h-dvh bg-surface-base text-text-high">
-      <a href="#study-content" className="study-skip">
-        Skip to lessons
-      </a>
-      <header className="study-top">
-        <a href="#/learn">Replay / Learn</a>
-        <a href="#/">Sessions & saved replays</a>
-        <ThemeToggle />
-      </header>
-      {catalog.state === "loading" ? (
-        <p role="status" className="p-8">
-          Reading course maps…
-        </p>
-      ) : catalog.state === "failed" ? (
-        <p role="alert" className="p-8">
-          {catalog.message}
-        </p>
-      ) : (
-        <>
-          {catalog.data.problems.map((p) => (
-            <p key={p.project} role="alert" className="p-4 text-warning-ink">
-              {p.project}: {p.message}
-            </p>
-          ))}
-          {catalog.data.courses.length === 0 ? (
-            <main className="mx-auto max-w-2xl p-8">
-              <h1 className="text-3xl font-semibold">A place for connected lessons</h1>
-              <p className="mt-4 text-text-mid">
-                No course map is available yet. Add a curriculum.manifest beside the
-                saved courses in .replays to organize chapters, prerequisites and
-                companion exports.
-              </p>
-              <a className="mt-5 inline-block underline" href="#/?tab=saved">
-                Browse saved replays
-              </a>
-            </main>
-          ) : (
-            (() => {
-              const current =
-                catalog.data.courses.find((c) => c.key === courseKey) ??
-                catalog.data.courses[0]!;
-              return (
-                <>
-                  {catalog.data.courses.length > 1 && (
-                    <nav
-                      aria-label="Courses"
-                      className="flex flex-wrap gap-4 px-8 py-4"
-                    >
-                      {catalog.data.courses.map((c) => (
-                        <a
-                          key={c.key}
-                          href={`#/learn/${c.key}`}
-                          aria-current={c.key === current.key ? "page" : undefined}
-                          className="underline"
-                        >
-                          {c.curriculum.title}
-                        </a>
-                      ))}
-                    </nav>
-                  )}
-                  <CourseMap key={current.key} course={current} />
-                </>
-              );
-            })()
-          )}
-        </>
-      )}
+    <div className="flex h-dvh flex-col bg-surface-base text-text-high">
+      <AppHeader place="learn" />
+      <div id="study-content" className="min-h-0 flex-1 overflow-y-auto">
+        {catalog.state === "loading" || (courses.state === "loading" && !courseKey) ? (
+          <p
+            role="status"
+            className="mx-auto max-w-4xl px-6 py-10 text-sm text-text-low"
+          >
+            Reading the courses…
+          </p>
+        ) : catalog.state === "failed" ? (
+          <p
+            role="alert"
+            className="mx-auto max-w-4xl px-6 py-10 text-sm text-danger-ink"
+          >
+            {catalog.message}
+          </p>
+        ) : course ? (
+          <CourseMap key={course.key} course={course} back />
+        ) : (
+          <LearnHome
+            maps={catalog.data.courses}
+            problems={catalog.data.problems}
+            courses={courses.state === "ready" ? courses.data.items : []}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
+interface Resume {
+  /** The replay it opens, as the routes name it. */
+  id: string;
+  title: string;
+  /** What it is part of, in a few words. */
+  context: string;
+  href: string;
+  progress: StudyProgress;
+  fraction: number;
+}
+
+/** The most recently studied thing not yet finished — the first thing Learn offers. */
+function resumeOf(maps: readonly StudyCourse[], courses: readonly SavedListing[]) {
+  const candidates: Resume[] = [];
+  for (const map of maps) {
+    const progress = courseProgress(map.curriculum.id, map.curriculum.revision);
+    for (const lesson of curriculumLessons(map.curriculum)) {
+      const saved = progress[lesson.id];
+      const href = studyHref({ ...map, lessonId: lesson.id }, lesson);
+      if (!saved || saved.reviewed || !href) continue;
+      candidates.push({
+        id: `${map.key}:${lesson.replay}`,
+        title: lesson.title,
+        context: map.curriculum.title,
+        href,
+        progress: saved,
+        fraction: fractionOf(saved, map.steps?.[lesson.id]),
+      });
+    }
+  }
+  for (const course of courses) {
+    const saved = listedProgress(course);
+    if (!saved || saved.reviewed || saved.cursor === 0) continue;
+    candidates.push({
+      id: course.id,
+      title: course.title,
+      context: course.repo,
+      href: `#/replay/${encodeURIComponent(course.id)}`,
+      progress: saved,
+      fraction: fractionOf(saved, course.steps),
+    });
+  }
+  return candidates.sort((a, b) => b.progress.updatedAt - a.progress.updatedAt)[0];
+}
+
+function LearnHome({
+  maps,
+  problems,
+  courses,
+}: {
+  maps: readonly StudyCourse[];
+  problems: readonly { project: string; message: string }[];
+  courses: readonly SavedListing[];
+}) {
+  const resume = resumeOf(maps, courses);
+  // Courses a map already lists are reached through it.
+  const mapped = new Set(
+    maps.flatMap((map) =>
+      curriculumLessons(map.curriculum).map((lesson) => `${map.key}:${lesson.replay}`),
+    ),
+  );
+  const loose = courses.filter((course) => !mapped.has(course.id));
+  return (
+    <main className="mx-auto flex max-w-4xl flex-col gap-10 px-6 pt-8 pb-24">
+      <header className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">Learn</h1>
+        <p className="max-w-prose text-sm text-text-mid">
+          Courses rebuild a repository from nothing, lesson by lesson — the real code
+          arriving a piece at a time, with the explanations beside it. Where you are in
+          each is kept in this browser; a lesson is done once you reach its end.
+        </p>
+      </header>
+
+      {problems.map((p) => (
+        <p key={p.project} role="alert" className="text-sm text-warning-ink">
+          {p.project}: {p.message}
+        </p>
+      ))}
+
+      {resume ? (
+        <section
+          aria-label="Continue learning"
+          className="flex items-center gap-6 rounded-panel border border-line bg-surface-low p-5"
+        >
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-emphasis-subtle text-emphasis">
+            <BookOpen aria-hidden className="size-5" />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <p className="text-2xs font-medium tracking-wide text-text-low uppercase">
+              Continue where you left off
+            </p>
+            <p className="truncate font-medium">{resume.title}</p>
+            <div className="flex items-center gap-3 text-xs text-text-low">
+              <span className="truncate">{resume.context}</span>
+              <ProgressMark progress={{ fraction: resume.fraction, done: false }} />
+              <span>{ago(new Date(resume.progress.updatedAt).toISOString())}</span>
+            </div>
+          </div>
+          <a
+            href={resume.href}
+            onClick={() => rememberTitle(resume.id, resume.title)}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-control bg-emphasis px-4 text-sm font-medium text-accent-text focus-bar hover:opacity-90"
+          >
+            Continue
+            <ArrowRight aria-hidden className="size-4" />
+          </a>
+        </section>
+      ) : null}
+
+      {maps.length ? (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-2xs font-medium tracking-wide text-text-low uppercase">
+            Course maps
+          </h2>
+          <ul className="grid gap-3 sm:grid-cols-2">
+            {maps.map((map) => {
+              const lessons = curriculumLessons(map.curriculum);
+              const progress = courseProgress(
+                map.curriculum.id,
+                map.curriculum.revision,
+              );
+              const done = lessons.filter((l) => progress[l.id]?.reviewed).length;
+              return (
+                <li key={map.key}>
+                  <a
+                    href={`#/learn/${map.key}`}
+                    className="flex h-full flex-col gap-3 rounded-panel border border-line p-4 focus-bar hover:border-line-high hover:bg-hover"
+                  >
+                    <span className="flex items-start gap-2.5">
+                      <GraduationCap
+                        aria-hidden
+                        className="mt-0.5 size-4 shrink-0 text-text-low"
+                      />
+                      <span className="flex min-w-0 flex-col gap-1">
+                        <span className="font-medium">{map.curriculum.title}</span>
+                        <span className="line-clamp-2 text-xs text-text-mid">
+                          {map.curriculum.description}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="mt-auto flex items-center gap-3 text-2xs text-text-low tabular-nums">
+                      <Bar fraction={lessons.length ? done / lessons.length : 0} />
+                      {done} of {lessons.length} lessons done
+                    </span>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
+      {maps.length && !loose.length ? null : (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-2xs font-medium tracking-wide text-text-low uppercase">
+            {maps.length ? "Other courses" : "Courses"}
+          </h2>
+          {loose.length ? (
+            <ul className="flex flex-col">
+              {loose.map((course) => {
+                const saved = listedProgress(course);
+                const fraction = fractionOf(saved, course.steps);
+                return (
+                  <li key={course.id}>
+                    <a
+                      href={`#/replay/${encodeURIComponent(course.id)}`}
+                      onClick={() => rememberTitle(course.id, course.title)}
+                      className="-mx-3 flex items-center gap-4 rounded-control px-3 py-2.5 focus-bar hover:bg-hover"
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="truncate text-sm">{course.title}</span>
+                        <span className="truncate text-xs text-text-low">
+                          {course.repo}
+                          {course.lessons !== undefined
+                            ? ` · ${course.lessons} lesson${course.lessons === 1 ? "" : "s"}`
+                            : ""}
+                        </span>
+                      </span>
+                      {saved && (saved.cursor > 0 || saved.reviewed) ? (
+                        <ProgressMark
+                          progress={{ fraction, done: saved.reviewed || fraction >= 1 }}
+                        />
+                      ) : (
+                        <span className="shrink-0 text-2xs text-text-low">
+                          Not started
+                        </span>
+                      )}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="flex max-w-prose flex-col gap-2 text-sm text-text-mid">
+              <p>
+                {maps.length
+                  ? "Every course here is part of a course map above."
+                  : "No courses yet. Ask your agent to teach you a repository:"}
+              </p>
+              {maps.length ? null : (
+                <>
+                  <p className="rounded-control border border-line bg-surface-low px-3 py-2 text-text-high">
+                    “Teach me this repository. Build it up from scratch as a course.”
+                  </p>
+                  <p className="text-xs text-text-low">
+                    With the Replay plugin installed (or after{" "}
+                    <code className="font-mono">replay skills install</code>) it writes
+                    one into <code className="font-mono">.replays/</code>, and it
+                    appears here while it is being written.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+    </main>
+  );
+}
+
+function Bar({ fraction }: { fraction: number }) {
+  return (
+    <span aria-hidden className="h-1 w-20 overflow-hidden rounded-full bg-line-high">
+      <span
+        className="block h-full rounded-full bg-emphasis"
+        style={{ width: `${Math.round(fraction * 100)}%` }}
+      />
+    </span>
+  );
+}
+
+type Status = "done" | "started" | "new" | "unavailable";
+
+function StatusIcon({ status }: { status: Status }) {
+  switch (status) {
+    case "done":
+      return (
+        <span className="grid size-5 place-items-center rounded-full bg-success-subtle text-success-ink">
+          <Check aria-hidden className="size-3" />
+        </span>
+      );
+    case "started":
+      return <CircleDashed aria-hidden className="size-5 text-emphasis" />;
+    case "unavailable":
+      return <Lock aria-hidden className="size-4 text-text-low" />;
+    default:
+      return <Circle aria-hidden className="size-5 text-line-high" />;
+  }
+}
+
+/** A curriculum, chapter by chapter, with where the reader stands in each lesson. */
 export function CourseMap({
   course,
   exportBase,
+  back,
 }: {
   course: StudyCourse;
   exportBase?: string;
+  /** Offer the way back to the Learn page. */
+  back?: boolean;
 }) {
   const { curriculum } = course;
   const progress = courseProgress(curriculum.id, curriculum.revision);
   const all = curriculumLessons(curriculum);
+  const openable = (l: CurriculumLesson) =>
+    !course.unavailable.includes(l.id) && (exportBase === undefined || l.exportFile);
   const recent = all
-    .filter(
-      (l) =>
-        progress[l.id] &&
-        !course.unavailable.includes(l.id) &&
-        (exportBase === undefined || l.exportFile),
-    )
+    .filter((l) => progress[l.id] && openable(l))
     .sort((a, b) => progress[b.id]!.updatedAt - progress[a.id]!.updatedAt)[0];
   const next =
     recent && !progress[recent.id]!.reviewed
       ? recent
-      : all.find(
-          (l) =>
-            !progress[l.id]?.reviewed &&
-            !course.unavailable.includes(l.id) &&
-            (exportBase === undefined || l.exportFile),
-        );
-  const currentChapter =
-    curriculum.chapters.find((c) =>
-      c.lessons.some((l) => l.id === (next?.id ?? recent?.id)),
-    ) ?? curriculum.chapters[0]!;
-  const [chapterId, setChapterId] = React.useState(currentChapter.id);
+      : all.find((l) => !progress[l.id]?.reviewed && openable(l));
   const [query, setQuery] = React.useState("");
-  const selected = curriculum.chapters.find((c) => c.id === chapterId)!;
   const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  const matching = terms.length
-    ? curriculum.chapters.filter((c) =>
-        c.lessons.some((l) =>
-          terms.every((t) =>
-            `${l.id} ${l.title} ${l.goal} ${c.title}`.toLowerCase().includes(t),
-          ),
-        ),
-      )
-    : [selected];
-  const link = (lesson: (typeof all)[number]) => {
+  const matches = (l: CurriculumLesson, chapterTitle: string) =>
+    terms.every((t) =>
+      `${l.id} ${l.title} ${l.goal} ${chapterTitle}`.toLowerCase().includes(t),
+    );
+  const chapters = curriculum.chapters
+    .map((chapter, number) => ({
+      chapter,
+      number,
+      lessons: chapter.lessons.filter((l) => matches(l, chapter.title)),
+    }))
+    .filter((c) => c.lessons.length > 0);
+  const link = (lesson: CurriculumLesson) => {
     const href = studyHref(
       {
         ...course,
@@ -139,169 +374,196 @@ export function CourseMap({
     );
     return href && exportBase !== undefined ? `${exportBase}${href}` : href;
   };
-  const reviewed = all.filter((l) => progress[l.id]?.reviewed).length;
+  const statusOf = (lesson: CurriculumLesson): Status => {
+    if (!link(lesson)) return "unavailable";
+    const saved = progress[lesson.id];
+    if (saved?.reviewed) return "done";
+    if (saved) return "started";
+    return "new";
+  };
+  const done = all.filter((l) => progress[l.id]?.reviewed).length;
+  const percentOf = (lesson: CurriculumLesson) => {
+    const saved = progress[lesson.id];
+    const steps = course.steps?.[lesson.id];
+    return saved && steps
+      ? Math.round((Math.min(furthestOf(saved), steps) / steps) * 100)
+      : undefined;
+  };
+
   return (
-    <div className="study-shell">
-      <aside className="study-chapters">
-        <p className="study-eyebrow">Course contents</p>
-        <nav aria-label="Chapters">
-          {curriculum.chapters.map((c, i) => (
-            <button
-              key={c.id}
-              type="button"
-              aria-current={c.id === chapterId ? "step" : undefined}
-              onClick={() => {
-                setChapterId(c.id);
-                setQuery("");
-              }}
-            >
-              <span>{String(i + 1).padStart(2, "0")}</span>
-              <span>
-                {c.title}
-                <small>
-                  {c.lessons.filter((l) => progress[l.id]?.reviewed).length} /{" "}
-                  {c.lessons.length} reviewed
-                </small>
-              </span>
-            </button>
-          ))}
-        </nav>
-        <p className="study-storage">
-          Study position stays in this browser. “Reviewed” is your own checkpoint, not a
-          test score.
+    <main className="mx-auto flex max-w-4xl flex-col gap-8 px-6 pt-6 pb-24">
+      {back ? (
+        <a
+          href="#/learn"
+          className="-ml-2 flex items-center gap-1.5 self-start rounded-control px-2 py-1 text-xs text-text-low focus-bar hover:bg-hover hover:text-text-high"
+        >
+          <ArrowLeft aria-hidden className="size-3.5" />
+          All courses
+        </a>
+      ) : null}
+      <header className="flex flex-col gap-3">
+        <p className="text-2xs font-medium tracking-wide text-text-low uppercase">
+          Course map · {all.length} lessons in {curriculum.chapters.length} chapters
         </p>
-      </aside>
-      <main id="study-content" className="study-main">
-        <p className="study-eyebrow">
-          {all.length} lessons · {curriculum.chapters.length} chapters · {reviewed}{" "}
-          reviewed
+        <h1 className="text-2xl font-semibold tracking-tight text-balance">
+          {curriculum.title}
+        </h1>
+        <p className="max-w-prose text-sm text-text-mid">{curriculum.description}</p>
+        <p className="flex items-center gap-3 text-xs text-text-low tabular-nums">
+          <Bar fraction={all.length ? done / all.length : 0} />
+          {done} of {all.length} done
         </p>
-        <h1>{curriculum.title}</h1>
-        <p className="study-description">{curriculum.description}</p>
-        {next && link(next) ? (
-          <section className="study-resume" aria-label="Continue learning">
-            <div>
-              <p className="study-eyebrow">
-                {progress[next.id]
-                  ? "Continue where you left off"
-                  : "Next in your study path"}
-              </p>
-              <h2>
-                {next.id}. {next.title}
-              </h2>
-              <p>
-                {progress[next.id]
-                  ? `Saved at step ${progress[next.id]!.cursor}. `
-                  : ""}
-                {next.goal}
-              </p>
-            </div>
-            <a href={link(next)}>
-              {" "}
-              {progress[next.id] ? "Resume lesson" : "Start lesson"} →
-            </a>
-          </section>
-        ) : (
-          <p className="study-resume">
-            {all.some((l) => link(l))
-              ? "Every available lesson is marked reviewed. Revisit any chapter below."
-              : "No lessons are available to open yet. The course outline is shown below."}
-          </p>
-        )}
-        <div className="study-search">
-          <label htmlFor="lesson-search">Find a lesson across chapters</label>
-          <Input
-            id="lesson-search"
-            type="search"
-            placeholder="Search titles, topics or lesson numbers"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        {!matching.length && (
-          <p role="status">No lessons match “{query}”. Try another topic.</p>
-        )}
-        {matching.map((chapter) => (
-          <section key={chapter.id} className="study-section">
-            <p className="study-eyebrow">
-              Chapter {curriculum.chapters.indexOf(chapter) + 1}
+      </header>
+
+      {next && link(next) ? (
+        <section
+          aria-label="Continue learning"
+          className="flex items-center gap-6 rounded-panel border border-line bg-surface-low p-5"
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <p className="text-2xs font-medium tracking-wide text-text-low uppercase">
+              {progress[next.id]
+                ? "Continue where you left off"
+                : "Next in your study path"}
             </p>
-            <h2>{chapter.title}</h2>
-            <p>{chapter.description}</p>
-            <ol className="study-lessons">
-              {chapter.lessons
-                .filter((l) =>
-                  terms.every((t) =>
-                    `${l.id} ${l.title} ${l.goal} ${chapter.title}`
-                      .toLowerCase()
-                      .includes(t),
-                  ),
-                )
-                .map((l) => {
-                  const href = link(l),
-                    saved = progress[l.id];
-                  return (
-                    <li key={l.id}>
-                      <span className="study-number">{l.id}</span>
-                      <div>
-                        {href ? (
-                          <a className="study-lesson-title" href={href}>
-                            {l.title}
-                          </a>
-                        ) : (
-                          <span className="study-lesson-title">{l.title}</span>
-                        )}
-                        <p>{l.goal}</p>
-                        <div className="study-lesson-meta">
-                          <span
-                            className={
-                              saved?.reviewed ? "study-reviewed-label" : undefined
-                            }
-                          >
-                            {!href
-                              ? "Replay unavailable"
-                              : saved?.reviewed
-                                ? "Reviewed"
-                                : saved
-                                  ? "In progress"
-                                  : "Not started"}
-                          </span>
-                          {l.referenceOnly && <span>Reference collection</span>}
-                          {l.prerequisites.length > 0 && (
-                            <span>
-                              Before this:{" "}
-                              {l.prerequisites.map((id, i) => {
-                                const p = all.find((x) => x.id === id)!;
-                                return (
-                                  <React.Fragment key={id}>
-                                    {i ? ", " : ""}
-                                    <a href={link(p)} title={p.title}>
-                                      {id}
-                                    </a>
-                                  </React.Fragment>
-                                );
-                              })}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {href && (
+            <h2 className="font-medium">
+              {next.id}. {next.title}
+            </h2>
+            <p className="text-sm text-text-mid">
+              {progress[next.id] && percentOf(next) !== undefined
+                ? `${percentOf(next)}% through. `
+                : ""}
+              {next.goal}
+            </p>
+          </div>
+          <a
+            href={link(next)}
+            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-control bg-emphasis px-4 text-sm font-medium text-accent-text focus-bar hover:opacity-90"
+          >
+            {progress[next.id] ? "Resume lesson" : "Start lesson"} →
+          </a>
+        </section>
+      ) : (
+        <p className="rounded-panel border border-line bg-surface-low p-5 text-sm text-text-mid">
+          {all.some((l) => link(l))
+            ? "Every available lesson is done. Revisit any of them below."
+            : "No lessons are available to open yet. The outline is below."}
+        </p>
+      )}
+
+      <div className="relative">
+        <Search
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 left-2.5 z-raised icon-sm -translate-y-1/2 text-text-low"
+        />
+        <Input
+          id="lesson-search"
+          size="sm"
+          type="search"
+          aria-label="Find a lesson across chapters"
+          placeholder="Find a lesson — titles, topics or numbers"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="pl-8"
+        />
+      </div>
+      {!chapters.length && (
+        <p role="status" className="text-sm text-text-low">
+          No lessons match “{query}”.
+        </p>
+      )}
+
+      {chapters.map(({ chapter, number, lessons }) => (
+        <section key={chapter.id} className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1">
+            <p className="text-2xs font-medium tracking-wide text-text-low uppercase">
+              Chapter {number + 1} ·{" "}
+              {chapter.lessons.filter((l) => progress[l.id]?.reviewed).length}/
+              {chapter.lessons.length} done
+            </p>
+            <h2 className="text-lg font-semibold tracking-tight">{chapter.title}</h2>
+            <p className="max-w-prose text-sm text-text-mid">{chapter.description}</p>
+          </div>
+          <ol className="flex flex-col border-t border-line">
+            {lessons.map((l) => {
+              const href = link(l);
+              const status = statusOf(l);
+              const percent = percentOf(l);
+              return (
+                <li key={l.id} className="flex gap-3 border-b border-line py-3">
+                  <span className="flex w-6 shrink-0 justify-center pt-0.5">
+                    <StatusIcon status={status} />
+                  </span>
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <p className="flex items-baseline gap-2">
+                      <span className="text-xs text-text-low tabular-nums">{l.id}</span>
+                      {href ? (
                         <a
-                          className="study-open"
+                          className="rounded-control font-medium focus-bar hover:underline hover:decoration-line-high hover:underline-offset-2"
                           href={href}
-                          aria-label={`Open lesson ${l.id}`}
                         >
-                          →
+                          {l.title}
                         </a>
+                      ) : (
+                        <span className="font-medium text-text-low">{l.title}</span>
                       )}
-                    </li>
-                  );
-                })}
-            </ol>
-          </section>
-        ))}
-      </main>
-    </div>
+                    </p>
+                    <p className="max-w-prose text-sm text-text-mid">{l.goal}</p>
+                    <p className="flex flex-wrap gap-x-3 gap-y-1 text-2xs text-text-low">
+                      <span
+                        className={cn(
+                          status === "done" && "font-medium text-success-ink",
+                        )}
+                      >
+                        {status === "unavailable"
+                          ? "Replay unavailable"
+                          : status === "done"
+                            ? "Done"
+                            : status === "started"
+                              ? percent !== undefined
+                                ? `In progress · ${percent}%`
+                                : "In progress"
+                              : "Not started"}
+                      </span>
+                      {l.referenceOnly && <span>Reference collection</span>}
+                      {l.prerequisites.length > 0 && (
+                        <span>
+                          Before this:{" "}
+                          {l.prerequisites.map((id, i) => {
+                            const p = all.find((x) => x.id === id)!;
+                            return (
+                              <React.Fragment key={id}>
+                                {i ? ", " : ""}
+                                <a
+                                  href={link(p)}
+                                  title={p.title}
+                                  className="underline underline-offset-2"
+                                >
+                                  {id}
+                                </a>
+                              </React.Fragment>
+                            );
+                          })}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  {href && (
+                    <a
+                      className="grid size-8 shrink-0 place-items-center self-center rounded-control text-text-low focus-bar hover:bg-hover hover:text-text-high"
+                      href={href}
+                      aria-label={`Open lesson ${l.id}`}
+                    >
+                      <ArrowRight aria-hidden className="size-4" />
+                    </a>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ))}
+    </main>
   );
 }
 
@@ -313,19 +575,18 @@ export function StandaloneCourseLibrary({
   exportBase: string;
 }) {
   return (
-    <div className="study-library h-dvh bg-surface-base text-text-high">
-      <a href="#study-content" className="study-skip">
-        Skip to lessons
-      </a>
-      <header className="study-top">
-        <span className="mr-auto font-medium">Replay / Learn</span>
+    <div className="flex h-dvh flex-col bg-surface-base text-text-high">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
+        <span className="mr-auto text-sm font-semibold">Replay · Learn</span>
         <span className="text-xs text-text-low">Companion lesson library</span>
         <ThemeToggle />
       </header>
-      <CourseMap
-        course={{ key: "", curriculum, unavailable: [] }}
-        exportBase={exportBase}
-      />
+      <div id="study-content" className="min-h-0 flex-1 overflow-y-auto">
+        <CourseMap
+          course={{ key: "", curriculum, unavailable: [] }}
+          exportBase={exportBase}
+        />
+      </div>
     </div>
   );
 }
