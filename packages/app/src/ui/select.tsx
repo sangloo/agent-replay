@@ -14,18 +14,27 @@ const SIZE = {
   md: "h-8 px-3 text-sm",
 } as const;
 
+// A field reads as one, filled; a choice in a toolbar is quiet until hovered.
+const VARIANT = {
+  outline: "bg-hover text-text-high hover:bg-active",
+  ghost: "text-text-mid hover:bg-hover hover:text-text-high",
+} as const;
+
 export function SelectTrigger({
   className,
   size = "md",
+  variant = "outline",
   children,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: keyof typeof SIZE;
+  variant?: keyof typeof VARIANT;
 }) {
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "inline-flex cursor-pointer items-center justify-between gap-1.5 rounded-control border border-line-high bg-surface-raised text-text-high focus-bar hover:border-line-control data-[placeholder]:text-text-low [&>span]:truncate",
+        "inline-flex cursor-pointer items-center justify-between gap-1.5 rounded-control focus-bar data-[placeholder]:text-text-low [&>span]:truncate",
+        VARIANT[variant],
         SIZE[size],
         className,
       )}

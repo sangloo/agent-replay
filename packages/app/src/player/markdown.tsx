@@ -75,7 +75,7 @@ function SourceLink({ href, label }: { href: string; label: string }) {
         onClick={() => {
           if (destination) navigation?.navigate(destination);
         }}
-        className="rounded-sm text-emphasis underline decoration-emphasis/40 underline-offset-2 focus-bar disabled:cursor-help disabled:text-text-low disabled:decoration-dotted"
+        className="rounded-sm text-emphasis-ink underline decoration-emphasis/40 underline-offset-2 focus-bar disabled:cursor-help disabled:text-text-low disabled:decoration-dotted"
       >
         {label}
       </button>
@@ -126,7 +126,7 @@ function Inline({ text }: { text: string }): React.ReactNode {
             href={safe}
             target={safe.startsWith("#") ? undefined : "_blank"}
             rel="noreferrer"
-            className="text-emphasis underline decoration-emphasis/40 underline-offset-2 hover:decoration-emphasis"
+            className="text-emphasis-ink underline decoration-emphasis/40 underline-offset-2 hover:decoration-emphasis"
           >
             <Inline text={label} />
           </a>
@@ -161,7 +161,7 @@ function Code({ lang, text }: { lang: string; text: string }) {
   const language = lang ? (languageOf(`x.${lang}`) ?? lang) : undefined;
   const runs = React.useMemo(() => tokenize(text, language), [text, language]);
   return (
-    <pre className="my-3 overflow-x-auto rounded-control border border-line bg-surface-base px-3 py-2.5 font-mono text-[12.5px] leading-5">
+    <pre className="my-3 overflow-x-auto rounded-control bg-surface-mid px-3 py-2.5 font-mono text-[12.5px] leading-5">
       {paint(text, 0, runs).map((piece, i) =>
         piece.category ? (
           <span key={i} className={CATEGORY_CLASS[piece.category]}>

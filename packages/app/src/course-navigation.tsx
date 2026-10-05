@@ -41,11 +41,7 @@ export function CourseOutline({
       </div>
       <nav aria-label="Lesson outline" className="flex flex-col">
         {study.curriculum.chapters.map((c, i) => (
-          <details
-            key={c.id}
-            open={c.id === chapter.id}
-            className="group border-t border-line"
-          >
+          <details key={c.id} open={c.id === chapter.id} className="group">
             <summary className="flex cursor-pointer list-none items-baseline gap-2 py-2.5 font-medium text-text-high [&::-webkit-details-marker]:hidden">
               <ChevronRight
                 aria-hidden
@@ -160,10 +156,10 @@ export function LessonActions({
     >
       <button
         className={cn(
-          "study-reviewed inline-flex h-7 items-center gap-1.5 rounded-control border px-2.5 text-xs font-medium whitespace-nowrap focus-bar [&_svg]:size-3.5",
+          "study-reviewed inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium whitespace-nowrap focus-bar [&_svg]:size-3.5",
           done
-            ? "border-success-line bg-success-subtle text-success-ink"
-            : "border-line-control text-text-mid hover:bg-hover hover:text-text-high",
+            ? "bg-success-subtle text-success-ink"
+            : "bg-hover text-text-mid hover:bg-active hover:text-text-high",
         )}
         type="button"
         aria-label={done ? "Done" : "Mark as done"}

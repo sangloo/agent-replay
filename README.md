@@ -335,7 +335,9 @@ bounded at 2 MiB; binary and lockfile exclusions still apply.
 ### Connected lessons
 
 A course can carry an optional `.replays/curriculum.manifest` alongside its saved
-replays. The **Learn** tab then shows its map: the ordered chapters,
+replays. A course may live in a folder inside the repository (say
+`tutorials/backend/.replays/`): open the repository in the player and the
+**Learn** tab finds it, for the project picked. The **Learn** tab then shows its map: the ordered chapters,
 prerequisites, a suggested next lesson, and each lesson done, in progress or not
 started. A lesson is done once you reach its end; **Mark as done** sets it by hand
 either way. Progress is isolated by curriculum ID and revision, and kept both in

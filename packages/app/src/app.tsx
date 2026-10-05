@@ -12,13 +12,19 @@ import { Button } from "@/ui";
 import { api, knownTitle, useLoad, useSession } from "./api";
 import { Library } from "./library";
 import { CourseLibrary, StandaloneCourseLibrary } from "./course-library";
-import { libraryHash, parseLibrary, type LibraryParams } from "./library-params";
+import {
+  learnHash,
+  libraryHash,
+  parseLibrary,
+  type LibraryParams,
+} from "./library-params";
 import { Player } from "./player/player";
 import { PlayerSkeleton } from "./player/skeleton";
 import { ProgressVersion, useProgressSync } from "./progress-sync";
 
 type Route =
-  | { page: "learn"; key?: string }
+  /** `project`: a repository's root, as in the library; empty for all. */
+  | { page: "learn"; key?: string; project: string }
   | { page: "library"; params: LibraryParams }
   /** `at`: the step to open on — a link to a moment in the replay. */
   | { page: "replay"; id: string; at?: number }
@@ -27,7 +33,12 @@ type Route =
 function parse(hash: string): Route {
   const [path = "", search = ""] = hash.replace(/^#/, "").split("?");
   const [, page, id] = path.split("/");
-  if (page === "learn") return { page: "learn", key: id };
+  if (page === "learn")
+    return {
+      page: "learn",
+      key: id,
+      project: new URLSearchParams(search).get("project") ?? "",
+    };
   if ((page === "replay" || page === "session") && id) {
     const rawAt = new URLSearchParams(search).get("at");
     const at = rawAt === null ? undefined : Number(rawAt);
@@ -78,6 +89,18 @@ const setLibrary = (params: LibraryParams) => {
   window.history.replaceState(null, "", hash);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 };
+
+// Choosing another project in Learn, likewise — onto its list of courses.
+const setLearnProject = (project: string) => {
+  const hash = learnHash(project);
+  lastPlace = { hash, label: "Learn" };
+  window.history.replaceState(null, "", hash);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+};
+
+/** A saved replay's course is asked for by the folder its id names. */
+const loadCourseOf = (id: string) =>
+  api.curricula(new URLSearchParams({ key: id.split(":")[0] ?? "" }).toString());
 
 function Status({ children }: { children: React.ReactNode }) {
   return (
@@ -158,7 +181,7 @@ function useNewerCourse(id: string, shown: Replay | undefined): Replay | undefin
 
 function SavedReplay({ id, at }: { id: string; at?: number }) {
   const loaded = useLoad(id, api.replay);
-  const catalog = useLoad("curricula", api.curricula);
+  const catalog = useLoad(id, loadCourseOf);
   const source = React.useMemo(() => ({ kind: "replays" as const, id }), [id]);
   const [replay, setReplay] = React.useState<{ data: Replay; at?: number }>();
   const shown = replay?.data ?? (loaded.state === "ready" ? loaded.data : undefined);
@@ -200,7 +223,12 @@ function SavedReplay({ id, at }: { id: string; at?: number }) {
       onBack={
         study
           ? () => {
-              window.location.hash = `#/learn/${study.key}`;
+              // The map it was opened from keeps its project; any other way
+              // in, the map alone.
+              const map = `#/learn/${study.key}`;
+              window.location.hash = lastPlace?.hash.startsWith(map)
+                ? lastPlace.hash
+                : map;
             }
           : fallback.go
       }
@@ -282,13 +310,20 @@ function LibraryRoute({ params }: { params: LibraryParams }) {
   return <Library params={params} onParams={setLibrary} />;
 }
 
-function LearnRoute({ courseKey }: { courseKey?: string }) {
+function LearnRoute({ courseKey, project }: { courseKey?: string; project: string }) {
   React.useEffect(() => {
-    lastPlace = courseKey
-      ? { hash: `#/learn/${courseKey}`, label: "Course map" }
-      : LEARN;
-  }, [courseKey]);
-  return <CourseLibrary courseKey={courseKey} />;
+    lastPlace = {
+      hash: learnHash(project, courseKey),
+      label: courseKey ? "Course map" : "Learn",
+    };
+  }, [courseKey, project]);
+  return (
+    <CourseLibrary
+      courseKey={courseKey}
+      project={project}
+      onProject={setLearnProject}
+    />
+  );
 }
 
 /**
@@ -365,7 +400,7 @@ function Routed() {
   return (
     <ProgressVersion.Provider value={version}>
       {route.page === "learn" ? (
-        <LearnRoute courseKey={route.key} />
+        <LearnRoute courseKey={route.key} project={route.project} />
       ) : route.page === "replay" ? (
         <SavedReplay key={route.id} id={route.id} at={route.at} />
       ) : route.page === "session" ? (

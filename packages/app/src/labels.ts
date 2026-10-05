@@ -1,4 +1,4 @@
-import type { Frame, Step } from "@agent-replay/core";
+import type { Frame, Replay, Step } from "@agent-replay/core";
 
 export function fileName(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
@@ -138,4 +138,12 @@ export function project(cwd: string | undefined): string {
   if (!cwd) return "";
   const parts = cwd.split(/[\\/]/).filter(Boolean);
   return parts.at(-1) ?? cwd;
+}
+
+/**
+ * A change found in the end state but written before the session began:
+ * the working tree already had it, so it is not the session's doing.
+ */
+export function predates(step: Step, replay: Replay): boolean {
+  return step.kind === "external" && Date.parse(step.at) < Date.parse(replay.startedAt);
 }

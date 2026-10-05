@@ -1,5 +1,13 @@
 import type { Frame, NoteLevel, Replay, Step } from "@agent-replay/core";
-import { cn, Tree } from "@/ui";
+import {
+  cn,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tree,
+} from "@/ui";
 import {
   BookOpen,
   ChevronRight,
@@ -14,8 +22,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 
-import { Choice } from "../choice";
-import { firstLine, stepLabel, when } from "../labels";
+import { firstLine, predates, stepLabel, when } from "../labels";
 import { Markdown } from "./markdown";
 
 const NOTE: Record<
@@ -89,19 +96,22 @@ const Row = React.memo(function Row({
   replay: Replay;
   place: Place;
   onJump: (cursor: number) => void;
-  rowRef?: React.Ref<HTMLLIElement>;
+  rowRef?: React.Ref<HTMLElement>;
 }) {
   const { step, change } = frame;
   const note = replay.notes[step.id];
   const failed = step.kind === "command" && step.failed;
   return (
-    <li ref={rowRef} className={cn(place === "current" && "bg-active")}>
+    <li
+      ref={rowRef as React.Ref<HTMLLIElement>}
+      className={cn("mx-1.5 rounded-panel", place === "current" && "bg-active")}
+    >
       <button
         type="button"
         onClick={() => onJump(frame.index + 1)}
         aria-current={place === "current" ? "step" : undefined}
         className={cn(
-          "flex h-8 w-full items-center gap-2.5 px-4 text-left text-xs focus-bar",
+          "flex h-8 w-full items-center gap-2.5 rounded-panel px-2.5 text-left text-xs focus-bar",
           place !== "current" && "hover:bg-hover",
           place === "ahead" ? "text-text-low" : "text-text-high",
         )}
@@ -203,21 +213,14 @@ function Detail({
       : -1;
   const causeStep = cause >= 0 ? replay.steps[cause] : undefined;
   return (
-    <div className="flex flex-col gap-3 px-4 pt-1 pb-4 pl-10 text-sm">
+    <div className="flex flex-col gap-3 px-2.5 pt-1 pb-4 pl-9 text-sm">
       <p className="text-2xs text-text-low">
         <span className="font-mono">{when(step.at, replay)}</span>
         {step.agent !== "main" ? " · subagent" : ""}
         {change && !change.applied ? " · could not be applied" : ""}
       </p>
-      {note ? (
-        <div className={cn("border-l-2 pl-3", NOTE[note.level].rule)}>
-          <p className={cn("mb-0.5 text-2xs font-medium", NOTE[note.level].ink)}>
-            {NOTE[note.level].label}
-          </p>
-          <Fold text={note.text} className="text-text-high" />
-        </div>
-      ) : null}
-      <Body step={step} />
+      {note ? <NoteBlock note={note} /> : null}
+      <Body step={step} replay={replay} />
       {step.why ? <Fold text={step.why} className="text-text-mid" /> : null}
       {causeStep && causeStep.kind === "command" ? (
         <button
@@ -232,7 +235,36 @@ function Detail({
   );
 }
 
-function Body({ step }: { step: Step }) {
+function NoteBlock({ note }: { note: Replay["notes"][string] }) {
+  return (
+    <div className={cn("border-l-2 pl-3", NOTE[note.level].rule)}>
+      <p className={cn("mb-0.5 text-2xs font-medium", NOTE[note.level].ink)}>
+        {NOTE[note.level].label}
+      </p>
+      <Fold text={note.text} className="text-text-high" />
+    </div>
+  );
+}
+
+/**
+ * The prompt (or lesson) on screen, read in full under its heading in the
+ * list — said once there, not again in a row beneath.
+ */
+function PromptDetail({ frame, replay }: { frame: Frame; replay: Replay }) {
+  const { step } = frame;
+  const note = replay.notes[step.id];
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      {step.kind === "lesson" ? (
+        <p className="font-medium text-text-high">{step.title}</p>
+      ) : null}
+      {note ? <NoteBlock note={note} /> : null}
+      <Body step={step} replay={replay} />
+    </div>
+  );
+}
+
+function Body({ step, replay }: { step: Step; replay: Replay }) {
   switch (step.kind) {
     case "prompt":
     case "say":
@@ -246,7 +278,9 @@ function Body({ step }: { step: Step }) {
         <p className="text-text-mid">
           {step.reason === "drift"
             ? "Made by a shell command rather than an edit tool — seen when the next tool read the file."
-            : "Made by a shell command rather than an edit tool — found by comparing with the end state."}
+            : predates(step, replay)
+              ? "Already changed when the session began — written before it, outside its tools."
+              : "Made outside the session’s tools — a command, an editor or another agent — found by comparing with the end state."}
         </p>
       );
     case "commit":
@@ -296,11 +330,8 @@ export interface StepListProps {
   /** Steps applied; the current step is `cursor - 1`. */
   cursor: number;
   onJump: (cursor: number) => void;
-  /** The filter, offered above the list; absent for a course, which shows everything. */
+  /** The steps shown (chosen in the panel's bar); absent for a course, which shows everything. */
   filter?: Filter;
-  onFilter?: (filter: Filter) => void;
-  /** Steps with a note, for the filter's count. */
-  notes?: number;
 }
 
 interface Group {
@@ -354,8 +385,6 @@ const GroupedStepList = React.memo(function GroupedStepList({
   cursor,
   onJump,
   filter,
-  onFilter,
-  notes = 0,
   groups,
 }: StepListProps & { groups: readonly Group[] }) {
   // The step on screen — or, when the filter hides it, the last shown before it.
@@ -384,7 +413,7 @@ const GroupedStepList = React.memo(function GroupedStepList({
       ? shownMore
       : { group: currentGroup, before: 0, after: 0 };
 
-  const currentRef = React.useRef<HTMLLIElement>(null);
+  const currentRef = React.useRef<HTMLElement>(null);
   const headRef = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => {
     (currentRef.current ?? headRef.current)?.scrollIntoView({ block: "nearest" });
@@ -404,14 +433,11 @@ const GroupedStepList = React.memo(function GroupedStepList({
 
   return (
     <div className="flex flex-col pb-6">
-      {filter && onFilter ? (
-        <FilterBar filter={filter} onFilter={onFilter} notes={notes} sticky />
-      ) : null}
       <button
         type="button"
         onClick={() => onJump(0)}
         className={cn(
-          "flex h-8 items-center gap-2.5 px-4 text-left text-xs focus-bar",
+          "mx-1.5 flex h-8 items-center gap-2.5 rounded-panel px-2.5 text-left text-xs focus-bar",
           cursor === 0 ? "bg-active text-text-high" : "text-text-low hover:bg-hover",
         )}
       >
@@ -430,6 +456,7 @@ const GroupedStepList = React.memo(function GroupedStepList({
         // Steps before the first prompt have no header to open them by.
         const open = here || opened.has(g) || !group.prompt;
         const reached = (group.prompt?.index ?? group.rows[0]?.index ?? 0) < cursor;
+        const isCurrent = group.prompt !== undefined && group.prompt.index === current;
         let rows = group.rows;
         let hiddenBefore = 0;
         let hiddenAfter = 0;
@@ -459,70 +486,75 @@ const GroupedStepList = React.memo(function GroupedStepList({
               group.prompt.step.kind === "lesson") ? (
               <div
                 className={cn(
-                  "flex border-b border-line bg-surface-base",
-                  open && "sticky top-0 z-raised",
-                  open && filter && onFilter && "top-9",
-                  group.prompt.index === current && "bg-active",
+                  "flex flex-col",
+                  isCurrent
+                    ? "mx-1.5 rounded-panel bg-active"
+                    : "bg-surface-low px-1.5",
+                  // The open turn's question stays in view above its steps;
+                  // on screen itself it reads in full, so it scrolls.
+                  open && !isCurrent && "sticky top-0 z-raised",
                 )}
               >
-                <button
-                  ref={here ? headRef : undefined}
-                  type="button"
-                  onClick={() => onJump(group.prompt!.index + 1)}
-                  className="flex min-w-0 flex-1 flex-col gap-0.5 py-2 pl-4 text-left focus-bar"
-                >
-                  <span className="text-2xs text-text-low">
-                    {group.prompt.step.kind === "lesson"
-                      ? `Lesson ${lessons}`
-                      : `Prompt · ${when(group.prompt.step.at, replay)}`}
-                    {!open && group.rows.length
-                      ? ` · ${plural(group.rows.length, unit)}${group.files ? ` · ${plural(group.files, "file")}` : ""}`
-                      : ""}
-                  </span>
-                  <span
-                    className={cn(
-                      "text-xs",
-                      open ? "line-clamp-3" : "line-clamp-1",
-                      isLesson && "font-medium",
-                      reached ? "text-text-high" : "text-text-low",
-                    )}
-                  >
-                    {group.prompt.step.kind === "lesson"
-                      ? group.prompt.step.title
-                      : firstLine(group.prompt.step.text, 240)}
-                  </span>
-                </button>
-                {!here && group.rows.length ? (
+                <div className="flex">
                   <button
+                    ref={here ? headRef : undefined}
                     type="button"
-                    onClick={() => toggle(g)}
-                    aria-expanded={open}
-                    aria-label={
-                      open ? "Hide this turn's steps" : "Show this turn's steps"
-                    }
-                    className="flex w-8 shrink-0 items-center justify-center text-text-low focus-bar hover:text-text-high"
+                    onClick={() => onJump(group.prompt!.index + 1)}
+                    aria-current={isCurrent ? "step" : undefined}
+                    className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-panel py-2 pl-2.5 text-left focus-bar"
                   >
-                    <ChevronRight
-                      aria-hidden
-                      className={cn(
-                        "size-3.5 transition-transform duration-fast",
-                        open && "rotate-90",
-                      )}
-                    />
+                    <span className="text-2xs text-text-low">
+                      {group.prompt.step.kind === "lesson"
+                        ? `Lesson ${lessons}`
+                        : `Prompt · ${when(group.prompt.step.at, replay)}`}
+                      {!open && group.rows.length
+                        ? ` · ${plural(group.rows.length, unit)}${group.files ? ` · ${plural(group.files, "file")}` : ""}`
+                        : ""}
+                    </span>
+                    {isCurrent ? null : (
+                      <span
+                        className={cn(
+                          "text-xs",
+                          open ? "line-clamp-3" : "line-clamp-1",
+                          isLesson && "font-medium",
+                          reached ? "text-text-high" : "text-text-low",
+                        )}
+                      >
+                        {group.prompt.step.kind === "lesson"
+                          ? group.prompt.step.title
+                          : firstLine(group.prompt.step.text, 240)}
+                      </span>
+                    )}
                   </button>
+                  {!here && group.rows.length ? (
+                    <button
+                      type="button"
+                      onClick={() => toggle(g)}
+                      aria-expanded={open}
+                      aria-label={
+                        open ? "Hide this turn's steps" : "Show this turn's steps"
+                      }
+                      className="flex w-8 shrink-0 items-center justify-center text-text-low focus-bar hover:text-text-high"
+                    >
+                      <ChevronRight
+                        aria-hidden
+                        className={cn(
+                          "size-3.5 transition-transform duration-fast",
+                          open && "rotate-90",
+                        )}
+                      />
+                    </button>
+                  ) : null}
+                </div>
+                {isCurrent ? (
+                  <div
+                    ref={currentRef as React.Ref<HTMLDivElement>}
+                    className="px-2.5 pb-3"
+                  >
+                    <PromptDetail frame={group.prompt} replay={replay} />
+                  </div>
                 ) : null}
               </div>
-            ) : null}
-            {group.prompt && group.prompt.index === current ? (
-              <ul>
-                <Row
-                  frame={group.prompt}
-                  replay={replay}
-                  place="current"
-                  onJump={onJump}
-                  rowRef={currentRef}
-                />
-              </ul>
             ) : null}
             {open && group.rows.length ? (
               <ul className="flex flex-col py-1">
@@ -563,56 +595,45 @@ const GroupedStepList = React.memo(function GroupedStepList({
   );
 });
 
-/** What the list and the timeline show: changes, everything, or the noted steps. */
-function FilterBar({
+/**
+ * What the list and the timeline show — changes, everything, or the noted
+ * steps — as one quiet choice in the panel's bar rather than a bar of its own.
+ */
+export function StepFilter({
   filter,
   onFilter,
   notes,
-  sticky,
+  className,
 }: {
   filter: Filter;
   onFilter: (filter: Filter) => void;
   notes: number;
-  sticky?: boolean;
+  className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-low px-2",
-        sticky && "sticky top-0 z-raised",
-      )}
-    >
-      <Choice<Filter>
-        label="Steps shown"
-        value={filter}
-        onChange={onFilter}
-        options={[
-          {
-            value: "changes",
-            label: "Changes",
-            hint: "File changes, under the prompts they answer",
-          },
-          {
-            value: "all",
-            label: "Everything",
-            hint: "Every step: commands, replies, changes",
-          },
-          ...(notes
-            ? [
-                {
-                  value: "notes" as const,
-                  label: (
-                    <>
-                      Notes <span className="font-normal tabular-nums">{notes}</span>
-                    </>
-                  ),
-                  hint: "Only the steps with a reviewer's note",
-                },
-              ]
-            : []),
-        ]}
-      />
-    </div>
+    <Select value={filter} onValueChange={(value) => onFilter(value as Filter)}>
+      <SelectTrigger
+        size="sm"
+        variant="ghost"
+        aria-label="Steps shown"
+        className={cn("shrink-0", className)}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="end">
+        <SelectItem value="changes" title="File changes, under the prompts they answer">
+          Changes
+        </SelectItem>
+        <SelectItem value="all" title="Every step: commands, replies, changes">
+          Everything
+        </SelectItem>
+        {notes ? (
+          <SelectItem value="notes" title="Only the steps with a reviewer’s note">
+            Notes · {notes}
+          </SelectItem>
+        ) : null}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -627,7 +648,7 @@ function More({
     <button
       type="button"
       onClick={onClick}
-      className="flex h-8 w-full items-center px-4 pl-10 text-left text-2xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
+      className="flex h-8 w-full items-center rounded-panel px-2.5 pl-9 text-left text-2xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
     >
       Show {children}
     </button>
@@ -655,16 +676,7 @@ export const StepList = React.memo(function StepList(props: StepListProps) {
   );
 });
 
-function VirtualSteps({
-  replay,
-  frames,
-  visible,
-  cursor,
-  onJump,
-  filter,
-  onFilter,
-  notes = 0,
-}: StepListProps) {
+function VirtualSteps({ replay, frames, visible, cursor, onJump }: StepListProps) {
   const lines = React.useMemo(
     () =>
       visible.map((index) => ({
@@ -678,13 +690,10 @@ function VirtualSteps({
   const current = frames[index];
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {filter && onFilter ? (
-        <FilterBar filter={filter} onFilter={onFilter} notes={notes} />
-      ) : null}
       <button
         type="button"
         className={cn(
-          "flex h-8 shrink-0 items-center gap-2.5 px-4 text-left text-xs focus-bar",
+          "mx-1.5 flex h-8 shrink-0 items-center gap-2.5 rounded-panel px-2.5 text-left text-xs focus-bar",
           cursor === 0 ? "bg-active text-text-high" : "text-text-low hover:bg-hover",
         )}
         onClick={() => onJump(0)}
@@ -705,7 +714,7 @@ function VirtualSteps({
         icon={(row) => <StepIcon frame={frames[Number(row.id)]!} className="icon-sm" />}
       />
       {current && (
-        <div className="max-h-[40%] shrink-0 overflow-auto border-t border-line p-3">
+        <div className="max-h-[40%] shrink-0 overflow-auto bg-surface-base p-3">
           <Detail frame={current} replay={replay} onJump={onJump} />
         </div>
       )}

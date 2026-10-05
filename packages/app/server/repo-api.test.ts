@@ -7,15 +7,22 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { Replay } from "@agent-replay/core";
+import type { Replay, StudyCatalog } from "@agent-replay/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createHandler, pageOf, type Page, type Project } from "./api.ts";
+import {
+  createHandler,
+  pageOf,
+  type Page,
+  type Project,
+  type SavedListing,
+} from "./api.ts";
 import { idKey } from "./store.ts";
 
 const temp = realpathSync(mkdtempSync(join(tmpdir(), "replay-repo-api-")));
@@ -206,6 +213,50 @@ describe("the repository around a replay", () => {
   });
 });
 
+describe("an image in the repository", () => {
+  const image = (path: string, rev?: string) =>
+    new Promise<{ status: number; type?: string; bytes: Buffer }>((resolve, reject) => {
+      const query = new URLSearchParams(rev ? { path, rev } : { path });
+      httpRequest(
+        { host: "127.0.0.1", port, path: `/api/replays/${key()}:s1/image?${query}` },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("end", () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              type: res.headers["content-type"],
+              bytes: Buffer.concat(chunks),
+            }),
+          );
+        },
+      )
+        .on("error", reject)
+        .end();
+    });
+
+  it("is served as itself, from the working tree or a commit, and nothing else is", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    writeFileSync(join(repo, "shot.png"), png);
+    symlinkSync("/etc/hosts", join(repo, "out.png"));
+    try {
+      const shown = await image("shot.png");
+      expect(shown.status).toBe(200);
+      expect(shown.type).toBe("image/png");
+      expect(shown.bytes.equals(png)).toBe(true);
+      // Never committed, so not at the base.
+      expect((await image("shot.png", base)).status).toBe(404);
+      expect((await image("README.md")).status).toBe(415);
+      expect((await image("out.png")).status).toBe(400);
+      expect((await image("../x.png")).status).toBe(400);
+      expect((await image("shot.png", "HEAD")).status).toBe(400);
+    } finally {
+      rmSync(join(repo, "shot.png"));
+      rmSync(join(repo, "out.png"));
+    }
+  });
+});
+
 describe("projects", () => {
   const write = { "x-request-id": "r1", "content-type": "application/json" };
 
@@ -267,5 +318,128 @@ describe("projects", () => {
     };
     expect(listing.path).toBe(temp);
     expect(listing.folders.find((folder) => folder.name === "repo")?.repo).toBe(true);
+  });
+});
+
+describe("a course kept in a folder nested in a project", () => {
+  // As `replay course … --repo tutorials/backend` leaves one: its own
+  // `.replays/` and map, in a folder of the repository.
+  const outer = join(temp, "outer");
+  const course = join(outer, "tutorials", "backend");
+  const write = { "x-request-id": "r2", "content-type": "application/json" };
+  const query = (params: Record<string, string>) => new URLSearchParams(params);
+  let outerBase = "";
+
+  beforeAll(() => {
+    mkdirSync(join(outer, "src"), { recursive: true });
+    execFileSync("git", ["init", "-q", outer]);
+    writeFileSync(join(outer, "src", "b.ts"), "export const b = 2;\n");
+    execFileSync("git", ["-C", outer, "add", "."]);
+    execFileSync("git", [
+      ...["-C", outer, "-c", "user.name=t", "-c", "user.email=t@t"],
+      ...["commit", "-qm", "base"],
+    ]);
+    outerBase = execFileSync("git", ["-C", outer, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    mkdirSync(join(course, ".replays"), { recursive: true });
+    const lesson = replay("lesson-one", "One", "course", "2026-09-04T10:00:00Z");
+    lesson.repo = { ...lesson.repo, base: outerBase, end: outerBase };
+    writeFileSync(join(course, ".replays", "lesson-one.json"), JSON.stringify(lesson));
+    writeFileSync(
+      join(course, ".replays", "curriculum.manifest"),
+      JSON.stringify({
+        version: 1,
+        id: "outer",
+        revision: outerBase,
+        title: "Understand outer",
+        description: "From nothing.",
+        chapters: [
+          {
+            id: "first",
+            title: "First",
+            description: "Start.",
+            lessons: [
+              {
+                id: "01",
+                title: "One",
+                goal: "Begin.",
+                replay: "lesson-one",
+                prerequisites: [],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+  });
+
+  it("is found once the folder is opened, and listed under the repository", async () => {
+    // Opened from inside the course's folder: kept as the repository's root.
+    const added = await get(port, "/api/projects", {
+      method: "POST",
+      body: { path: course },
+      headers: write,
+    });
+    expect(added.body.data).toMatchObject({ root: outer, saved: 1, added: true });
+
+    const inProject = (await get(port, `/api/curricula?${query({ project: outer })}`))
+      .body.data as StudyCatalog;
+    expect(inProject.courses.map((c) => [c.key, c.curriculum.title])).toEqual([
+      [idKey(course), "Understand outer"],
+    ]);
+    expect(inProject.courses[0]!.unavailable).toEqual([]);
+    const everywhere = (await get(port, "/api/curricula")).body.data as StudyCatalog;
+    expect(everywhere.courses.map((c) => c.key)).toContain(idKey(course));
+    // Another project's courses are not this one's.
+    const elsewhere = (await get(port, `/api/curricula?${query({ project: repo })}`))
+      .body.data as StudyCatalog;
+    expect(elsewhere.courses).toEqual([]);
+
+    const lessons = (
+      await get(port, `/api/replays?${query({ agent: "course", project: outer })}`)
+    ).body.data as Page<SavedListing>;
+    expect(lessons.items).toMatchObject([
+      {
+        id: `${idKey(course)}:lesson-one`,
+        repo: "outer/tutorials/backend",
+        project: outer,
+      },
+    ]);
+  });
+
+  it("opens a lesson from it with the repository's files, on a fresh start too", async () => {
+    // A new service has listed nothing yet: the folder is found from its key.
+    const fresh = createHandler({ repos: [] });
+    const ask = async (url: string) => {
+      let text = "";
+      const response = {
+        statusCode: 0,
+        setHeader() {},
+        end: (body: string) => (text = body),
+      };
+      await fresh(
+        { method: "GET", url, headers: {} } as never,
+        response as never,
+        () => {},
+      );
+      return { status: response.statusCode, body: JSON.parse(text) };
+    };
+    const id = `${idKey(course)}:lesson-one`;
+    expect((await ask(`/replays/${id}`)).status).toBe(200);
+    const catalog = (await ask(`/curricula?${query({ key: idKey(course) })}`)).body
+      .data as StudyCatalog;
+    expect(catalog.courses.map((c) => c.curriculum.title)).toEqual([
+      "Understand outer",
+    ]);
+    // Asked of the repository's root, not of the folder the course is in.
+    expect((await ask(`/replays/${id}/tree`)).body.data).toEqual({
+      rev: outerBase,
+      paths: ["src/b.ts"],
+    });
+    const file = await ask(
+      `/replays/${id}/file?${query({ rev: outerBase, path: "src/b.ts" })}`,
+    );
+    expect(file.body.data).toMatchObject({ content: "export const b = 2;\n" });
   });
 });

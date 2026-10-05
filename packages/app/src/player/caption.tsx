@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { cn, Kbd } from "@/ui";
 
-import { firstLine, stepLabel, when } from "../labels";
+import { firstLine, predates, stepLabel, when } from "../labels";
 import { plainText } from "./markdown-parse";
 import { StepIcon } from "./steps";
 
@@ -132,8 +132,10 @@ export const Caption = React.memo(function Caption({
               </button>
               {" — an edit no tool call recorded, shown where it happened."}
             </>
+          ) : predates(step, replay) ? (
+            "Already changed when the session began — written before it, outside its tools."
           ) : (
-            "An edit no tool call recorded — a formatter, a script or a person — shown where it was first seen."
+            "An edit no tool call recorded — a formatter, a script, another agent or a person."
           )}
         </Text>
       );
@@ -187,7 +189,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div
       aria-live="polite"
-      className="flex h-[4.75rem] shrink-0 flex-col gap-1 overflow-hidden border-b border-line bg-surface-low px-5 py-2.5"
+      className="mx-2 mb-2 flex h-20 shrink-0 flex-col gap-1 overflow-hidden rounded-panel bg-surface-low px-4 py-2.5"
     >
       {children}
     </div>

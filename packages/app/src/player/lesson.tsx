@@ -8,6 +8,7 @@ import {
 import {
   BookOpen,
   Check,
+  ChevronLeft,
   ChevronRight,
   CircleCheck,
   FilePlus2,
@@ -15,7 +16,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 
-import { cn } from "@/ui";
+import { cn, IconButton } from "@/ui";
 
 import { fileName } from "../labels";
 import { DeferredDetails } from "./deferred-details";
@@ -114,30 +115,56 @@ export const LessonPanel = React.memo(function LessonPanel({
 
   return (
     <div className="flex flex-col">
-      <div className="border-b border-line px-5 py-3">
-        <button
-          type="button"
-          onClick={() => setContents(!contents)}
-          aria-expanded={contents}
-          className="flex w-full items-center gap-1.5 rounded-control text-left text-xs text-text-low focus-bar hover:text-text-mid"
-        >
-          <BookOpen aria-hidden className="size-3.5" />
-          {lesson.number
-            ? `Lesson ${lesson.number} of ${counted}`
-            : `Introduction · ${counted} lessons`}
-          {counted ? (
-            <span className="ml-1 text-text-low tabular-nums">· {readCount} read</span>
-          ) : null}
-          <ChevronRight
-            aria-hidden
-            className={cn(
-              "ml-auto size-3.5 transition-transform duration-fast",
-              contents && "rotate-90",
-            )}
-          />
-        </button>
+      {/* Where in the course, and the way between explanations: one line. */}
+      <div className="px-3 pt-1 pb-2">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setContents(!contents)}
+            aria-expanded={contents}
+            className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-control px-2 text-left text-xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
+          >
+            <BookOpen aria-hidden className="size-3.5" />
+            {lesson.number
+              ? `Lesson ${lesson.number} of ${counted}`
+              : `Introduction · ${counted} lessons`}
+            {counted ? (
+              <span className="ml-1 text-text-low tabular-nums">
+                · {readCount} read
+              </span>
+            ) : null}
+            <ChevronRight
+              aria-hidden
+              className={cn(
+                "size-3.5 shrink-0 transition-transform duration-fast",
+                contents && "rotate-90",
+              )}
+            />
+          </button>
+          <nav
+            aria-label="Explanation navigation"
+            className="flex shrink-0 items-center"
+          >
+            <IconButton
+              label="Previous explanation"
+              size="sm"
+              disabled={!previous}
+              onClick={() => previous && onJump(previous.index + 1)}
+            >
+              <ChevronLeft />
+            </IconButton>
+            <IconButton
+              label="Next explanation"
+              size="sm"
+              disabled={!next}
+              onClick={() => next && onJump(next.index + 1)}
+            >
+              <ChevronRight />
+            </IconButton>
+          </nav>
+        </div>
         {contents ? (
-          <ol className="mt-2 flex flex-col">
+          <ol className="mt-1 flex flex-col px-2">
             {lessons.map((item, i) => {
               const step = item.frame?.step;
               const first = item.frame?.index ?? item.frames[0]?.index ?? 0;
@@ -174,28 +201,7 @@ export const LessonPanel = React.memo(function LessonPanel({
         ) : null}
       </div>
 
-      <nav
-        aria-label="Explanation navigation"
-        className="flex justify-between gap-3 border-b border-line px-5 py-2 text-xs text-text-mid"
-      >
-        <button
-          type="button"
-          disabled={!previous}
-          onClick={() => previous && onJump(previous.index + 1)}
-          className="rounded-control focus-bar disabled:opacity-40"
-        >
-          ← Previous explanation
-        </button>
-        <button
-          type="button"
-          disabled={!next}
-          onClick={() => next && onJump(next.index + 1)}
-          className="rounded-control focus-bar disabled:opacity-40"
-        >
-          Next explanation →
-        </button>
-      </nav>
-      <article className="flex flex-col gap-4 px-5 pt-4 pb-10">
+      <article className="flex flex-col gap-4 px-5 pt-2 pb-10">
         <header className="flex flex-col gap-1">
           <h2
             className={cn(

@@ -77,11 +77,11 @@ it("resumes saved steps, honors explicit deep links, and completes a lesson at i
   expect(
     screen.getByRole("link", { name: "Next lesson" }).closest("footer"),
   ).not.toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Next explanation →" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next explanation" }));
   expect(window.location.hash).toContain("at=3");
   expect(readStudyProgress(key)?.reviewed).toBe(false);
   // The last explanation is the end of the lesson: reaching it completes it.
-  fireEvent.click(screen.getByRole("button", { name: "Next explanation →" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next explanation" }));
   expect(window.location.hash).toContain("at=4");
   expect(readStudyProgress(key)).toMatchObject({
     reviewed: true,

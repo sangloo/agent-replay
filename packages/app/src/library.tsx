@@ -25,7 +25,12 @@ import {
 import { AppHeader } from "./app-header";
 import { FolderDialog } from "./folder-dialog";
 import { ago, dayGroup, project as folderName, size } from "./labels";
-import { libraryHash, PAGE_SIZE, type LibraryParams } from "./library-params";
+import {
+  learnHash,
+  libraryHash,
+  PAGE_SIZE,
+  type LibraryParams,
+} from "./library-params";
 import { ProgressVersion } from "./progress-sync";
 import { ProjectPicker } from "./project-picker";
 import { fractionOf, listedProgress, type StudyProgress } from "./study-progress";
@@ -300,25 +305,26 @@ export function Library({
           : "Nothing saved yet. Open a session and save it, or run `replay capture` in a repository.";
 
   return (
-    <div className="min-h-dvh bg-surface-base text-text-high">
-      <div className="sticky top-0 z-raised bg-surface-base">
-        <AppHeader
-          place={tab}
-          hrefOf={(place) =>
-            place === "learn"
-              ? "#/learn"
-              : libraryHash({ ...params, tab: place, agent: "", q: "", page: 1 })
-          }
-          picker={
-            <ProjectPicker
-              projects={known}
-              value={project}
-              onChange={(root) => onParams({ ...params, project: root, page: 1 })}
-              onOpenFolder={() => setOpening(true)}
-            />
-          }
-        />
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-6 pt-6 pb-3">
+    <div className="flex h-dvh flex-col bg-surface-low text-text-high">
+      <AppHeader
+        place={tab}
+        hrefOf={(place) =>
+          place === "learn"
+            ? learnHash(project)
+            : libraryHash({ ...params, tab: place, agent: "", q: "", page: 1 })
+        }
+        picker={
+          <ProjectPicker
+            projects={known}
+            value={project}
+            onChange={(root) => onParams({ ...params, project: root, page: 1 })}
+            onOpenFolder={() => setOpening(true)}
+          />
+        }
+      />
+      {/* The sheet: search stays at its top, the list scrolls under it. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface-base shadow-sheet sm:mx-2 sm:mb-2 sm:rounded-surface">
+        <div className="mx-auto flex w-full max-w-4xl shrink-0 items-center gap-3 px-6 pt-6 pb-3">
           <div className="relative min-w-40 flex-1">
             <Search
               aria-hidden
@@ -366,68 +372,70 @@ export function Library({
             </SelectContent>
           </Select>
         </div>
-        <p className="mx-auto max-w-4xl px-6 pb-3 text-xs text-text-low">
+        <p className="mx-auto w-full max-w-4xl shrink-0 px-6 pb-3 text-xs text-text-low">
           {tab === "sessions"
             ? "Agent sessions on this machine — Claude Code, Codex and Gemini CLI. Each is read live when you open it."
             : "Replays and courses saved into a repository’s .replays/ folder — with their notes, ready to share."}
         </p>
+
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem)]">
+          <div className="mx-auto flex max-w-4xl flex-col gap-6 px-3 pt-3 pb-24">
+            <div
+              className={cn(
+                "px-3 transition-opacity duration-fast",
+                current.busy && data && "opacity-60",
+              )}
+            >
+              {current.error ? (
+                <p className="py-3 text-sm text-danger-ink">{current.error}</p>
+              ) : !data ? (
+                <p className="py-3 text-sm text-text-low">Loading…</p>
+              ) : items.length === 0 ? (
+                <p className="max-w-prose py-3 text-sm text-text-low">{empty}</p>
+              ) : (
+                <Rows items={items} />
+              )}
+            </div>
+
+            {data && data.total > PAGE_SIZE ? (
+              <nav
+                aria-label="Pages"
+                className="mx-6 flex items-center justify-between pt-2 text-xs text-text-low"
+              >
+                <span className="tabular-nums">
+                  {data.offset + 1}–{Math.min(data.offset + data.limit, data.total)} of{" "}
+                  {data.total}
+                </span>
+                <span className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+
+                    disabled={page <= 1}
+                    onClick={() => turn(page - 1)}
+                  >
+                    <ChevronLeft />
+                    Newer
+                  </Button>
+                  <span className="tabular-nums">
+                    {page} / {pages}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+
+                    disabled={page >= pages}
+                    onClick={() => turn(page + 1)}
+                  >
+                    Older
+                    <ChevronRight />
+                  </Button>
+                </span>
+              </nav>
+            ) : null}
+          </div>
+        </main>
       </div>
-
-      <main className="mx-auto flex max-w-4xl flex-col gap-6 px-3 pt-3 pb-24">
-        <div
-          className={cn(
-            "px-3 transition-opacity duration-fast",
-            current.busy && data && "opacity-60",
-          )}
-        >
-          {current.error ? (
-            <p className="py-3 text-sm text-danger-ink">{current.error}</p>
-          ) : !data ? (
-            <p className="py-3 text-sm text-text-low">Loading…</p>
-          ) : items.length === 0 ? (
-            <p className="max-w-prose py-3 text-sm text-text-low">{empty}</p>
-          ) : (
-            <Rows items={items} />
-          )}
-        </div>
-
-        {data && data.total > PAGE_SIZE ? (
-          <nav
-            aria-label="Pages"
-            className="mx-6 flex items-center justify-between border-t border-line pt-4 text-xs text-text-low"
-          >
-            <span className="tabular-nums">
-              {data.offset + 1}–{Math.min(data.offset + data.limit, data.total)} of{" "}
-              {data.total}
-            </span>
-            <span className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-
-                disabled={page <= 1}
-                onClick={() => turn(page - 1)}
-              >
-                <ChevronLeft />
-                Newer
-              </Button>
-              <span className="tabular-nums">
-                {page} / {pages}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-
-                disabled={page >= pages}
-                onClick={() => turn(page + 1)}
-              >
-                Older
-                <ChevronRight />
-              </Button>
-            </span>
-          </nav>
-        ) : null}
-      </main>
 
       <FolderDialog
         open={opening}

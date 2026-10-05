@@ -146,6 +146,39 @@ describe("capture", () => {
     expect(replay.steps.at(-1)).not.toHaveProperty("cause");
   });
 
+  it("places an unexplained change when the file was last written", () => {
+    const written = "2026-01-01T00:00:03.500Z";
+    const replay = run([prompt("first"), say("reading"), prompt("second"), say("ok")], {
+      readBase: () => null,
+      readFinal: (path) => (path === "notes.md" ? "made elsewhere\n" : null),
+      changed: ["notes.md"],
+      modifiedAt: () => written,
+    });
+    expect(replay.steps.map((s) => s.kind)).toEqual([
+      "prompt",
+      "say",
+      "prompt",
+      "external",
+      "say",
+    ]);
+    expect(replay.steps[3]).toMatchObject({ path: "notes.md", at: written });
+  });
+
+  it("keeps a timed change after the file's last recorded edit", () => {
+    const replay = run(
+      [prompt("go"), ...write("w1", "a.ts", "one\n", null), prompt("next"), say("ok")],
+      {
+        readBase: () => null,
+        readFinal: (path) => (path === "a.ts" ? "one\ntwo\n" : null),
+        changed: ["a.ts"],
+        modifiedAt: () => "2026-01-01T00:00:00.500Z",
+      },
+    );
+    const ids = replay.steps.map((s) => s.id);
+    expect(ids.indexOf("untracked:a.ts")).toBe(ids.indexOf("w1") + 1);
+    expect(play(replay).contentAt("a.ts", replay.steps.length)).toBe("one\ntwo\n");
+  });
+
   it("ends in the repository's end state, whatever happened in between", () => {
     const final: Record<string, string | null> = {
       "a.ts": "A2\n",

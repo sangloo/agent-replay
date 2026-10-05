@@ -88,9 +88,9 @@ describe("capture at the edges", () => {
     gemini: join(temp, "none"),
   });
 
-  it("keeps edits made through a symlinked path as edits", () => {
+  it("keeps edits made through a symlinked path as edits", async () => {
     const session = findSession(SESSION, homes())!;
-    const { replay } = captureSession({ session, root: repo });
+    const { replay } = await captureSession({ session, root: repo });
     expect(replay.steps.find((s) => s.id === "e1")).toMatchObject({
       kind: "edit",
       path: "a.ts",
@@ -100,9 +100,9 @@ describe("capture at the edges", () => {
     );
   });
 
-  it("never stores a gitignored file's content", () => {
+  it("never stores a gitignored file's content", async () => {
     const session = findSession(SESSION, homes())!;
-    const { replay } = captureSession({ session, root: repo });
+    const { replay } = await captureSession({ session, root: repo });
     expect(replay.omitted).toContain(".env.local");
     expect(JSON.stringify(replay)).not.toContain("hunter2");
   });

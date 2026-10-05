@@ -27,5 +27,5 @@ export {
 } from "./select";
 export { Kbd, ShortcutsSheet, type ShortcutGroup } from "./shortcuts";
 export { ThemeProvider } from "./theme";
-export { useTheme, type Theme } from "./use-theme";
+export { ACCENTS, useTheme, type Accent, type Theme } from "./use-theme";
 export { Tree, type TreeLine, type TreeProps, type TreeRow } from "./tree";

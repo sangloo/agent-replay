@@ -65,7 +65,10 @@ export function readPayload(args: readonly string[]): HookPayload {
 }
 
 /** Capture and save; returns what happened, for a log line. Never throws. */
-export function runHook(payload: HookPayload, fallbackCwd: string): string {
+export async function runHook(
+  payload: HookPayload,
+  fallbackCwd: string,
+): Promise<string> {
   try {
     const session =
       (payload.transcriptPath && findSession(payload.transcriptPath)) ||
@@ -74,7 +77,7 @@ export function runHook(payload: HookPayload, fallbackCwd: string): string {
     if (!session) return "no session found";
     const root = git.repoRoot(payload.cwd ?? session.cwd ?? fallbackCwd);
     if (!root) return "not in a git repository";
-    const { replay } = captureSession({ session, root });
+    const { replay } = await captureSession({ session, root });
     if (!replay.steps.some(isChange)) return "no changes to replay";
     return `saved ${saveReplay(root, replay)}`;
   } catch (error) {

@@ -28,7 +28,7 @@ async function stream() {
     title: session.title,
     bytes: session.bytes,
   });
-  const { replay, root, warnings } = captureSession(
+  const { replay, root, warnings } = await captureSession(
     {
       session,
       onProgress: (message) =>
@@ -73,15 +73,15 @@ async function stream() {
   await emit({ kind: "done" });
 }
 
-function whole() {
+async function whole() {
   const session = findSession(workerData.id, undefined, { exact: true });
   if (!session) throw new Error(`No session ${workerData.id} on this machine.`);
-  const captured = captureSession({ session }, workerData.repos);
+  const captured = await captureSession({ session }, workerData.repos);
   parentPort!.postMessage({ result: captured });
 }
 
 try {
-  if (workerData.mode === "replay") whole();
+  if (workerData.mode === "replay") await whole();
   else await stream();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

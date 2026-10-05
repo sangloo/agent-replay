@@ -16,7 +16,8 @@ export function Input({ size = "sm", className, ...props }: InputProps) {
   return (
     <input
       className={cn(
-        "w-full min-w-0 rounded-control border border-line-high bg-surface-raised text-text-high outline-none placeholder:text-text-low hover:border-line-control focus-visible:border-emphasis focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden",
+        // Filled rather than outlined; the accent rings it while it is typed in.
+        "w-full min-w-0 rounded-control bg-hover text-text-high outline-none placeholder:text-text-low hover:bg-active focus-visible:bg-transparent focus-visible:shadow-[inset_0_0_0_1.5px_var(--emphasis)] focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden",
         SIZE[size],
         className,
       )}

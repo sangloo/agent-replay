@@ -640,7 +640,7 @@ switch (command) {
       replay,
       root: repo,
       warnings,
-    } = captureSession({
+    } = await captureSession({
       session,
       root,
       base: values.base,
@@ -778,10 +778,12 @@ switch (command) {
       replay = load(path).replay;
     } else {
       const root = values.repo ? resolve(here, values.repo) : git.repoRoot(here);
-      replay = captureSession({
-        session: pickSession(values.session, root),
-        root,
-      }).replay;
+      replay = (
+        await captureSession({
+          session: pickSession(values.session, root),
+          root,
+        })
+      ).replay;
     }
     const dist = playerDist();
     if (!hasPlayer(dist)) buildPlayer();
@@ -824,10 +826,12 @@ switch (command) {
     if (path) replay = load(path).replay;
     else {
       const root = values.repo ? resolve(here, values.repo) : git.repoRoot(here);
-      replay = captureSession({
-        session: pickSession(values.session, root),
-        root,
-      }).replay;
+      replay = (
+        await captureSession({
+          session: pickSession(values.session, root),
+          root,
+        })
+      ).replay;
     }
     const playback = play(replay);
     const ledger = evidenceOf(replay, (index) => playback.frames[index]?.change);
@@ -949,7 +953,7 @@ switch (command) {
     // overlapping captures are safe: saves are atomic renames.)
     const payload = readPayload(rest.filter((arg) => arg !== "--wait"));
     if (rest.includes("--wait")) {
-      process.stderr.write(`replay: ${runHook(payload, here)}\n`);
+      process.stderr.write(`replay: ${await runHook(payload, here)}\n`);
       process.exit(0);
     }
     try {

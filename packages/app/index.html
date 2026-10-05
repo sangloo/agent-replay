@@ -4,11 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#16161a" />
+    <meta name="theme-color" content="#0b0b0b" />
     <title>Replay</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 2.5v11l9-5.5z'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect width='20' height='20' rx='5' fill='%23171717'/%3E%3Cpath d='M7.1 6.1v7.8l6.75-3.9z' fill='%23fff' stroke='%23fff' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E"
     />
     <script>
       // Apply the stored theme before first paint so the page never flashes
@@ -24,6 +24,8 @@
               : stored;
           document.documentElement.classList.toggle("dark", theme === "dark");
           document.documentElement.classList.toggle("light", theme === "light");
+          var accent = localStorage.getItem("accent");
+          if (accent) document.documentElement.setAttribute("data-accent", accent);
         } catch {}
       })();
     </script>

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +15,7 @@ import { join } from "node:path";
 import { play } from "@agent-replay/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { captureSession } from "./capture.ts";
+import { captureSession, repoRoots } from "./capture.ts";
 import { findSession } from "./sessions.ts";
 import { findSaved, idKey, readReplay, saveReplay } from "./store.ts";
 
@@ -92,10 +93,10 @@ afterAll(() => {
 });
 
 describe("captureSession", () => {
-  it("replays a session from its base commit to the working tree", () => {
+  it("replays a session from its base commit to the working tree", async () => {
     const session = findSession(SESSION);
     expect(session?.title).toBe("Bump x, drop b, add c");
-    const { replay, root, warnings } = captureSession({ session: session! });
+    const { replay, root, warnings } = await captureSession({ session: session! });
     expect(warnings).toEqual([]);
     expect(root).toBe(git("rev-parse", "--show-toplevel"));
     expect(replay.repo).toMatchObject({ name: "repo", base, dirty: true, commits: [] });
@@ -117,14 +118,14 @@ describe("captureSession", () => {
     }
   });
 
-  it("saves one file per session and keeps notes across re-captures", () => {
+  it("saves one file per session and keeps notes across re-captures", async () => {
     const session = findSession(SESSION)!;
-    const first = captureSession({ session, title: "Bump x" });
+    const first = await captureSession({ session, title: "Bump x" });
     saveReplay(first.root, {
       ...first.replay,
       notes: { e1: { level: "review", text: "Check the bump." } },
     });
-    const again = captureSession({ session });
+    const again = await captureSession({ session });
     const name = findSaved(again.root, SESSION)!;
     expect(name).toBe(`${name.slice(0, 10)}-bump-x-${idKey(SESSION)}`);
     expect(again.replay.title).toBe("Bump x");
@@ -134,15 +135,90 @@ describe("captureSession", () => {
     expect(readReplay(again.root, name)?.id).toBe(SESSION);
   });
 
-  it("keeps two sessions whose ids share a prefix apart", () => {
+  it("keeps two sessions whose ids share a prefix apart", async () => {
     // UUIDv7 (Codex): the first eight characters are a timestamp's.
     const session = findSession(SESSION)!;
-    const { replay, root } = captureSession({ session, title: "Twin" });
+    const { replay, root } = await captureSession({ session, title: "Twin" });
     const a = { ...replay, id: "0199dd8e-1111-7000-8000-000000000001" };
     const b = { ...replay, id: "0199dd8e-2222-7000-8000-000000000002" };
     saveReplay(root, a);
     saveReplay(root, b);
     expect(readReplay(root, findSaved(root, a.id)!)?.id).toBe(a.id);
     expect(readReplay(root, findSaved(root, b.id)!)?.id).toBe(b.id);
+  });
+
+  it("places a file edited by hand when it was written, between the prompts around it", async () => {
+    const dir = join(temp, "timed");
+    const id = "0e1f2a3b-0000-4000-8000-000000000003";
+    const at = (seconds: number) => new Date(start + seconds * 1000);
+    const line = (seconds: number, entry: object) =>
+      JSON.stringify({ sessionId: id, cwd: dir, timestamp: at(seconds), ...entry });
+    const commit = (...args: string[]) =>
+      execFileSync("git", [
+        "-C",
+        dir,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        ...args,
+      ]);
+    mkdirSync(dir, { recursive: true });
+    execFileSync("git", ["init", "-q", dir]);
+    writeFileSync(join(dir, "notes.md"), "draft\n");
+    commit("add", ".");
+    commit("commit", "-qm", "base");
+    // After the commit, so the base is the commit whatever the clock says.
+    const start = Date.now() + 60_000;
+    mkdirSync(join(home, "projects", "timed"), { recursive: true });
+    writeFileSync(
+      join(home, "projects", "timed", `${id}.jsonl`),
+      [
+        line(0, { type: "user", uuid: "p1", message: { content: "Read the notes" } }),
+        line(1, {
+          type: "assistant",
+          uuid: "a1",
+          message: { content: [{ type: "text", text: "They are a draft." }] },
+        }),
+        line(20, { type: "user", uuid: "p2", message: { content: "Read them again" } }),
+        line(21, {
+          type: "assistant",
+          uuid: "a2",
+          message: { content: [{ type: "text", text: "They are final now." }] },
+        }),
+      ].join("\n"),
+    );
+    // Written by hand between the two prompts: no recorded call explains it.
+    writeFileSync(join(dir, "notes.md"), "final\n");
+    utimesSync(join(dir, "notes.md"), at(10), at(10));
+
+    const { replay } = await captureSession({ session: findSession(id)! });
+    const ids = replay.steps.map((step) => step.id);
+    const edit = ids.indexOf("untracked:notes.md");
+    expect(edit).toBeGreaterThan(ids.indexOf("prompt:p1"));
+    expect(edit).toBeLessThan(ids.indexOf("prompt:p2"));
+    expect(
+      Math.abs(Date.parse(replay.steps[edit]!.at) - at(10).getTime()),
+    ).toBeLessThan(1000);
+  });
+});
+
+describe("repoRoots", () => {
+  it("asks git once per directory, and knows a top level as its own", () => {
+    const top = join(temp, "roots");
+    mkdirSync(join(top, "src"), { recursive: true });
+    execFileSync("git", ["init", "-q", top]);
+    const repoRoot = repoRoots();
+    const found = repoRoot(join(top, "src"));
+    expect(found).toBe(
+      execFileSync("git", ["-C", top, "rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+      }).trim(),
+    );
+    // With the repository gone, only answers already given can still name it.
+    rmSync(join(top, ".git"), { recursive: true, force: true });
+    expect(repoRoot(join(top, "src"))).toBe(found);
+    expect(repoRoot(found!)).toBe(found);
+    expect(repoRoots()(join(top, "src"))).toBeUndefined();
   });
 });

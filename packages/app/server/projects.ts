@@ -18,9 +18,12 @@ import {
   renameSync,
   statSync,
   writeFileSync,
+  type Dirent,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+
+import { REPLAY_DIR } from "@agent-replay/core";
 
 import * as git from "./git.ts";
 
@@ -152,4 +155,81 @@ export function listFolders(path?: string): FolderListing {
 
 export function projectName(root: string): string {
   return basename(root) || root;
+}
+
+/** A folder inside a project, named from the project: `app/tutorials/backend`. */
+export function folderName(root: string, folder: string): string {
+  return folder === root
+    ? projectName(root)
+    : `${projectName(root)}/${relative(root, folder).split("\\").join("/")}`;
+}
+
+// A walk for saved replays skips dependencies and build output as well:
+// none of them holds a course, and some hold a great many folders.
+const SCAN_SKIP = new Set([
+  ...SKIP,
+  "vendor",
+  "dist",
+  "build",
+  "target",
+  "coverage",
+  "__pycache__",
+]);
+/** How many levels below a project a walk looks, and how many folders it reads. */
+export const SCAN_DEPTH = 4;
+const SCAN_FOLDERS = 2000;
+// Every listing asks, so a project's answer is kept a little while — long
+// enough to serve a page's few requests, short enough that a course written
+// into a new folder shows up on the next visit.
+const SCAN_TTL = 15_000;
+const scans = new Map<string, { at: number; folders: string[] }>();
+
+/**
+ * The folders in a project that keep replays: the project itself, then any
+ * folder up to a few levels down with a `.replays/` of its own — a course
+ * written into `tutorials/backend/.replays/` belongs to the repository around
+ * it. The walk is breadth-first and bounded by depth and by folders read; it
+ * never follows a link, and skips hidden folders and dependencies.
+ */
+export function replayFolders(root: string): string[] {
+  const now = Date.now();
+  const cached = scans.get(root);
+  if (cached && now - cached.at < SCAN_TTL) return cached.folders;
+  const nested: string[] = [];
+  let level = [root];
+  let budget = SCAN_FOLDERS;
+  for (let depth = 0; depth <= SCAN_DEPTH && level.length; depth++) {
+    const next: string[] = [];
+    for (const dir of level) {
+      if (budget-- <= 0) break;
+      let entries: Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        // A link reports itself as one, not as a folder: no cycles.
+        if (!entry.isDirectory()) continue;
+        if (entry.name === REPLAY_DIR) {
+          if (depth > 0) nested.push(dir);
+        } else if (
+          depth < SCAN_DEPTH &&
+          !entry.name.startsWith(".") &&
+          !SCAN_SKIP.has(entry.name)
+        ) {
+          next.push(join(dir, entry.name));
+        }
+      }
+    }
+    level = next;
+  }
+  const folders = [root, ...nested.sort()];
+  scans.delete(root);
+  scans.set(root, { at: now, folders });
+  for (const key of scans.keys()) {
+    if (scans.size <= 64) break;
+    scans.delete(key);
+  }
+  return folders;
 }

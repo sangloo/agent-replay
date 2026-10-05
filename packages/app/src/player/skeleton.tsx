@@ -38,8 +38,8 @@ export function PlayerSkeleton({
   const seconds = useSeconds();
   const widths = [62, 48, 71, 35, 80, 54, 66, 28, 74, 45, 58, 39, 69, 51];
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-surface-base text-text-high">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-2">
+    <div className="flex h-dvh flex-col overflow-hidden bg-surface-low text-text-high">
+      <header className="flex h-12 shrink-0 items-center gap-2 px-2">
         {onBack ? (
           <>
             <button
@@ -50,7 +50,6 @@ export function PlayerSkeleton({
               <ArrowLeft aria-hidden />
               {backLabel ?? "Back"}
             </button>
-            <span aria-hidden className="h-5 w-px bg-line" />
           </>
         ) : null}
         {title ? (
@@ -60,7 +59,7 @@ export function PlayerSkeleton({
         )}
       </header>
       <div className="flex min-h-0 flex-1">
-        <div className="hidden w-64 shrink-0 flex-col gap-3 border-r border-line bg-surface-low p-4 md:flex">
+        <div className="hidden w-64 shrink-0 flex-col gap-3 p-4 md:flex">
           {widths.slice(0, 9).map((w, i) => (
             <span
               key={i}
@@ -69,10 +68,10 @@ export function PlayerSkeleton({
             />
           ))}
         </div>
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-base shadow-sheet md:rounded-surface">
           <div
             role="status"
-            className="relative flex h-10 shrink-0 items-center gap-2 border-b border-line px-4 text-xs text-text-mid"
+            className="relative flex h-10 shrink-0 items-center gap-2 px-4 text-xs text-text-mid"
           >
             <LoaderCircle aria-hidden className="size-3.5 animate-spin text-text-low" />
             {what}
@@ -113,7 +112,7 @@ export function PlayerSkeleton({
             ) : null}
           </div>
         </main>
-        <div className="hidden w-80 shrink-0 flex-col gap-3 border-l border-line bg-surface-low p-4 lg:flex">
+        <div className="hidden w-80 shrink-0 flex-col gap-3 p-4 lg:flex">
           {widths.slice(3, 12).map((w, i) => (
             <span
               key={i}
@@ -123,7 +122,7 @@ export function PlayerSkeleton({
           ))}
         </div>
       </div>
-      <footer className="h-14 shrink-0 border-t border-line" />
+      <footer className="h-14 shrink-0" />
     </div>
   );
 }

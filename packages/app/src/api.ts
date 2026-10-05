@@ -127,7 +127,9 @@ export const knownTitle = (id: string) => titles.get(id);
 export const api = {
   replayStamp: (id: string) =>
     call<{ stamp: string }>("GET", `/api/replays/${encodeURIComponent(id)}/stamp`),
-  curricula: () => call<StudyCatalog>("GET", "/api/curricula"),
+  /** `query`: `project=…` (one repository's), `key=…` (a saved replay's folder), or none. */
+  curricula: (query = "") =>
+    call<StudyCatalog>("GET", `/api/curricula${query ? `?${query}` : ""}`),
   /** Where the reader is in each replay, as the local service keeps it. */
   progress: () => call<Record<string, StudyProgress>>("GET", "/api/progress"),
   saveProgress: (entries: Record<string, StudyProgress>, keepalive = false) =>
@@ -157,6 +159,12 @@ export const api = {
       "GET",
       `${sourcePath(source)}/file?${new URLSearchParams({ rev, path })}`,
     ),
+  /**
+   * An image in the repository, for an `<img>` rather than a fetch: at
+   * `rev`, or as it stands in the working tree.
+   */
+  imageUrl: (source: ReplaySource, path: string, rev?: string) =>
+    `${sourcePath(source)}/image?${new URLSearchParams(rev ? { path, rev } : { path })}`,
   session: (id: string) =>
     call<LiveReplay>(
       "GET",

@@ -5,8 +5,7 @@ import { cn } from "./cn";
 
 const VARIANT = {
   primary: "bg-accent text-accent-text hover:bg-accent-hover",
-  secondary:
-    "border border-line-control bg-surface-raised text-text-high hover:bg-hover",
+  secondary: "bg-hover text-text-high hover:bg-active",
   ghost: "text-text-mid hover:bg-hover hover:text-text-high",
   emphasis: "bg-emphasis text-accent-text hover:opacity-90",
 } as const;

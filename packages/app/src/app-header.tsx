@@ -1,8 +1,7 @@
 import { cn } from "@/ui";
-import { Play } from "lucide-react";
 import type * as React from "react";
 
-import { ThemeToggle } from "./theme-toggle";
+import { AppearanceMenu } from "./appearance";
 
 /** The three places outside a replay: what agents did, what was kept, what to learn. */
 export type Place = "sessions" | "saved" | "learn";
@@ -43,14 +42,12 @@ export function AppHeader({
 }) {
   const href = hrefOf ?? defaultHref;
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface-base px-3">
+    <header className="flex h-12 shrink-0 items-center gap-2 px-3">
       <a
         href="#/"
         className="flex items-center gap-1.5 rounded-control px-1.5 py-1 text-sm font-semibold focus-bar"
       >
-        <span className="grid size-5 place-items-center rounded-[5px] bg-emphasis text-accent-text">
-          <Play aria-hidden className="size-3 translate-x-px fill-current" />
-        </span>
+        <LogoMark />
         <span className="hidden sm:inline">Replay</span>
       </a>
       {picker ? (
@@ -61,10 +58,7 @@ export function AppHeader({
           <span className="min-w-0 shrink">{picker}</span>
         </>
       ) : null}
-      <nav
-        aria-label="Pages"
-        className="ml-auto flex h-full shrink-0 items-stretch gap-0.5 sm:gap-1"
-      >
+      <nav aria-label="Pages" className="ml-auto flex shrink-0 items-center gap-0.5">
         {PLACES.map((item) => (
           <a
             key={item.place}
@@ -72,19 +66,42 @@ export function AppHeader({
             title={item.hint}
             aria-current={item.place === place ? "page" : undefined}
             className={cn(
-              "relative flex items-center px-1.5 text-sm focus-bar sm:px-2.5",
+              "flex h-7 items-center rounded-full px-2.5 text-sm focus-bar sm:px-3",
               item.place === place
-                ? "font-medium text-text-high after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-emphasis"
-                : "text-text-low hover:text-text-high",
+                ? "bg-active font-medium text-text-high"
+                : "text-text-low hover:bg-hover hover:text-text-high",
             )}
           >
             {item.label}
           </a>
         ))}
       </nav>
-      <span aria-hidden className="mx-1 hidden h-5 w-px bg-line sm:block" />
-      <ThemeToggle />
+      <AppearanceMenu />
     </header>
+  );
+}
+
+/**
+ * The mark: a play triangle on a tile. Drawn rather than taken from the
+ * icon set, whose triangle sits a pixel and a half right of centre at this
+ * size. A triangle's bounding box looks left-heavy and its centroid
+ * right-heavy, so the box sits a little right of centre, between the two.
+ */
+export function LogoMark({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 20 20"
+      className={cn("size-5 shrink-0 text-emphasis", className)}
+    >
+      <rect width="20" height="20" rx="5" fill="currentColor" />
+      <path
+        d="M7.1 6.1v7.8l6.75-3.9z"
+        className="fill-accent-text stroke-accent-text"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

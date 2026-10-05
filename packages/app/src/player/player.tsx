@@ -17,9 +17,9 @@ import {
   ArrowLeft,
   Check,
   Download,
-  Keyboard,
-  PanelLeft,
-  PanelRight,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Pause,
   Play,
   SkipBack,
@@ -44,7 +44,7 @@ import {
   type Tone,
 } from "@/ui";
 
-import type { ReplaySource } from "../api";
+import { api, type ReplaySource } from "../api";
 import { Choice } from "../choice";
 import { CourseOutline, LessonActions } from "../course-navigation";
 import { firstLine, stepLabel, when } from "../labels";
@@ -55,7 +55,6 @@ import {
   readStudyProgress,
   saveStudyProgress,
 } from "../study-progress";
-import { ThemeToggle } from "../theme-toggle";
 import { Caption } from "./caption";
 import { CodeView, type Blame, type CodeViewProps, type Origin } from "./code-view";
 import type { Diffable } from "./compose";
@@ -64,7 +63,8 @@ import { FilesPanel } from "./files";
 import { LessonPanel } from "./lesson";
 import { lessonsOf } from "./lessons";
 import { SourceNavigationContext } from "./source-context";
-import { StepList, type Filter } from "./steps";
+import { PlayerMenu } from "./player-menu";
+import { StepFilter, StepList, type Filter } from "./steps";
 import {
   SPEEDS,
   usePlayback,
@@ -74,6 +74,8 @@ import {
 } from "./use-playback";
 import { PlayerSkeleton } from "./skeleton";
 import { useRepo } from "./use-repo";
+
+const countOf = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 function percent(part: number, whole: number): string {
   return whole ? `${Math.round((part / whole) * 100)}%` : "–";
@@ -764,6 +766,32 @@ function ReadyPlayer({
     ) : (
       <Message>No files changed.</Message>
     );
+  } else if (
+    source &&
+    isImage(path) &&
+    // Not there yet, or deleted by now: said in words below.
+    !(entry && !shown.diff && shown.content === null)
+  ) {
+    // A picture cannot be typed in: it is shown as the replay ends (a
+    // changed one) or as the base has it (one the replay leaves alone).
+    const rev = entry
+      ? replay.repo.dirty
+        ? undefined
+        : replay.repo.end
+      : tree?.state === "ready"
+        ? tree.data.rev
+        : replay.repo.base;
+    body = (
+      <ImagePreview
+        key={path}
+        src={api.imageUrl(
+          source,
+          path,
+          rev && /^[0-9a-f]{40}$/.test(rev) ? rev : undefined,
+        )}
+        note={entry ? "As it is at the end" : undefined}
+      />
+    );
   } else if (entry?.omitted) {
     body = (
       <Message>
@@ -831,18 +859,18 @@ function ReadyPlayer({
 
   const dir = path ? path.slice(0, path.lastIndexOf("/") + 1) : "";
   const name = path ? path.slice(path.lastIndexOf("/") + 1) : "";
-  // In a course the lesson panel is the narration: the caption would only
-  // say the same thing again above the code.
-  const narrated = isCourse && stepsOpen && side === "lesson";
+  // The open side panel already narrates — a course's lesson, or the step
+  // on screen opened in the list — so the caption would only say it twice.
+  const narrated = stepsOpen && side === (isCourse ? "lesson" : "steps");
   const lessonDone = isCourse && reviewed;
 
   return (
     <SourceNavigationContext.Provider value={navigation}>
       <div
-        className={`flex h-dvh flex-col overflow-hidden bg-surface-base text-text-high ${isCourse ? "study-player" : ""}`}
+        className={`flex h-dvh flex-col overflow-hidden bg-surface-low text-text-high ${isCourse ? "study-player" : ""}`}
         data-study-pane={studyPane}
       >
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line pr-2 pl-2">
+        <header className="flex h-12 shrink-0 items-center gap-2 px-2">
           {onBack ? (
             <button
               type="button"
@@ -863,8 +891,7 @@ function ReadyPlayer({
           ) : (
             <span aria-hidden className="w-1" />
           )}
-          <span aria-hidden className="h-5 w-px shrink-0 bg-line" />
-          <div className="flex min-w-0 flex-col justify-center leading-tight">
+          <div className="flex min-w-0 flex-col justify-center pl-1 leading-tight">
             <h1 className="min-w-0 truncate text-sm font-medium">{replay.title}</h1>
             <p className="hidden min-w-0 truncate text-2xs text-text-low sm:block">
               {repo ?? replay.repo.name}
@@ -876,12 +903,12 @@ function ReadyPlayer({
                 </span>
               ) : null}
               {isCourse
-                ? ` · ${lessons.filter((l) => l.frame).length} lessons`
+                ? ` · ${countOf(lessons.filter((l) => l.frame).length, "lesson")}`
                 : ` · ${agentName(replay.source)}`}
             </p>
           </div>
           <span
-            className="ml-auto hidden shrink-0 font-mono text-xs text-text-low tabular-nums md:inline"
+            className="mr-1 ml-auto hidden shrink-0 font-mono text-xs text-text-low tabular-nums md:inline"
             title="The net change, from the start to the end"
           >
             {totals ? (
@@ -922,34 +949,7 @@ function ReadyPlayer({
               <span className="hidden md:inline">Export</span>
             </a>
           ) : null}
-          <span className="flex items-center">
-            <Tool
-              label={filesOpen ? "Hide files ( [ )" : "Show files ( [ )"}
-              aria-pressed={filesOpen}
-              onClick={toggleFiles}
-            >
-              <PanelLeft />
-            </Tool>
-            <Tool
-              label={
-                stepsOpen
-                  ? `Hide the ${isCourse ? "lesson" : "steps"} ( ] )`
-                  : `Show the ${isCourse ? "lesson" : "steps"} ( ] )`
-              }
-              aria-pressed={stepsOpen}
-              onClick={toggleSteps}
-            >
-              <PanelRight />
-            </Tool>
-            <Tool
-              label="Keyboard shortcuts ( ? )"
-              onClick={() => setHelp(true)}
-              className="hidden md:inline-flex"
-            >
-              <Keyboard />
-            </Tool>
-            <ThemeToggle />
-          </span>
+          <PlayerMenu onShortcuts={() => setHelp(true)} />
         </header>
         {isCourse && (
           <div className="study-mobile-tabs" role="group" aria-label="Study pane">
@@ -976,17 +976,17 @@ function ReadyPlayer({
         <ShortcutsSheet open={help} onOpenChange={setHelp} groups={SHORTCUTS} />
 
         {warnings.length ? (
-          <p className="border-b border-line px-4 py-1.5 text-xs text-warning-ink">
+          <p className="mx-2 mb-2 rounded-panel bg-warning-subtle px-4 py-2 text-xs text-warning-ink">
             {warnings.join(" ")}
           </p>
         ) : null}
         {notice ? (
-          <p className="border-b border-line bg-emphasis-subtle px-4 py-1.5 text-xs text-text-mid">
+          <p className="mx-2 mb-2 rounded-panel bg-emphasis-subtle px-4 py-2 text-xs text-text-mid">
             {notice}
           </p>
         ) : null}
         {resumeNote && !notice ? (
-          <p className="flex items-center gap-3 border-b border-line bg-emphasis-subtle px-4 py-1.5 text-xs text-text-mid">
+          <p className="mx-2 mb-2 flex items-center gap-3 rounded-panel bg-emphasis-subtle px-4 py-2 text-xs text-text-mid">
             <span>
               Picked up where you left off
               {isCourse ? "" : ` — step ${position} of ${visible.length}`}.
@@ -1016,7 +1016,7 @@ function ReadyPlayer({
               max={560}
               label="Resize the files panel"
               {...filesWidth}
-              className="study-files player-panel left-0 border-r border-line bg-surface-low"
+              className="study-files player-panel left-0 bg-surface-low"
             >
               <nav aria-label="Files" className="h-full">
                 <FilesPanel
@@ -1028,14 +1028,33 @@ function ReadyPlayer({
                   active={frame?.change?.path}
                   onSelect={selectFile}
                   filterRef={filterRef}
+                  onHide={toggleFiles}
                 />
               </nav>
             </ResizablePanel>
           ) : null}
 
-          <main className="study-code flex min-w-0 flex-1 flex-col">
-            <div className="relative flex h-10 shrink-0 items-center gap-3 border-b border-line pr-2 pl-4 text-xs">
-              <span className="min-w-0 truncate font-mono text-text-low" title={path}>
+          {/* The code on its own sheet: the one thing in the frame that is not chrome. */}
+          <main
+            className={cn(
+              "study-code flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-base shadow-sheet md:rounded-surface",
+              !filesOpen && "md:ml-2",
+              !stepsOpen && "md:mr-2",
+            )}
+          >
+            <div className="relative flex h-10 shrink-0 items-center gap-3 px-2 text-xs">
+              {filesOpen ? null : (
+                <Tool label="Show files ( [ )" onClick={toggleFiles}>
+                  <PanelLeftOpen />
+                </Tool>
+              )}
+              <span
+                className={cn(
+                  "min-w-0 truncate font-mono text-text-low",
+                  filesOpen && "pl-2",
+                )}
+                title={path}
+              >
                 {dir}
                 <span className="text-text-high">{name}</span>
               </span>
@@ -1064,6 +1083,14 @@ function ReadyPlayer({
                 onChange={setView}
                 className="ml-auto shrink-0"
               />
+              {stepsOpen ? null : (
+                <Tool
+                  label={`Show the ${isCourse ? "lesson" : "steps"} ( ] )`}
+                  onClick={toggleSteps}
+                >
+                  <PanelRightOpen />
+                </Tool>
+              )}
               <LiveBar store={transport.progress} live={shown.live} />
             </div>
             {narrated ? null : <Caption replay={replay} frame={frame} onJump={jump} />}
@@ -1077,10 +1104,10 @@ function ReadyPlayer({
               max={720}
               label="Resize the side panel"
               {...stepsWidth}
-              className="study-reading player-panel right-0 border-l border-line bg-surface-low"
+              className="study-reading player-panel right-0 bg-surface-low"
             >
               <aside aria-label="Session" className="flex h-full flex-col">
-                <div className="flex h-10 shrink-0 items-center border-b border-line px-2">
+                <div className="flex h-10 shrink-0 items-center gap-1 px-2">
                   <Choice
                     label="Side panel"
                     value={side}
@@ -1131,6 +1158,21 @@ function ReadyPlayer({
                           ]
                     }
                   />
+                  {side === "steps" && !isCourse ? (
+                    <StepFilter
+                      filter={filter}
+                      onFilter={setFilter}
+                      notes={noted.length}
+                      className="ml-auto"
+                    />
+                  ) : null}
+                  <Tool
+                    label={`Hide the ${isCourse ? "lesson" : "steps"} ( ] )`}
+                    onClick={toggleSteps}
+                    className={side === "steps" && !isCourse ? undefined : "ml-auto"}
+                  >
+                    <PanelRightClose />
+                  </Tool>
                 </div>
                 <div key={side} className="min-h-0 flex-1 overflow-auto">
                   {side === "courses" && study ? (
@@ -1170,9 +1212,7 @@ function ReadyPlayer({
                       visible={visible}
                       cursor={cursor}
                       onJump={jump}
-                      {...(isCourse
-                        ? {}
-                        : { filter, onFilter: setFilter, notes: noted.length })}
+                      {...(isCourse ? {} : { filter })}
                     />
                   ) : (
                     <EvidencePanel
@@ -1189,7 +1229,7 @@ function ReadyPlayer({
         </div>
 
         {activeReference ? (
-          <div className="flex items-center gap-3 border-t border-line bg-surface-mid px-3 py-2 text-xs">
+          <div className="mx-2 mt-2 flex items-center gap-3 rounded-panel bg-surface-mid px-4 py-2 text-xs">
             <span className="min-w-0 flex-1 truncate">
               Pinned source: {activeReference.path} · original lines{" "}
               {activeReference.lines.join("–")} → replay lines{" "}
@@ -1197,7 +1237,7 @@ function ReadyPlayer({
             </span>
             <button
               type="button"
-              className="shrink-0 text-emphasis underline focus-bar"
+              className="shrink-0 text-emphasis-ink underline focus-bar"
               onClick={() => {
                 jump(activeReference.returnCursor);
                 setReference(undefined);
@@ -1208,7 +1248,7 @@ function ReadyPlayer({
             </button>
           </div>
         ) : null}
-        <footer className="study-transport flex h-14 shrink-0 items-center gap-3 border-t border-line px-3">
+        <footer className="study-transport flex h-14 shrink-0 items-center gap-3 px-3">
           <div className="flex items-center gap-1">
             <Tool label="Previous step (←)" onClick={back}>
               <SkipBack />
@@ -1255,7 +1295,12 @@ function ReadyPlayer({
               value={String(transport.speed)}
               onValueChange={(next) => setSpeed(Number(next) as Speed)}
             >
-              <SelectTrigger size="sm" className="w-20 shrink-0" aria-label="Speed">
+              <SelectTrigger
+                size="sm"
+                variant="ghost"
+                className="shrink-0 tabular-nums"
+                aria-label="Speed"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1336,6 +1381,27 @@ function StepCount({
         ) : null}
       </div>
     </details>
+  );
+}
+
+// Raster images only: an SVG is text, and reads (and diffs) as code.
+const isImage = (path: string) => /\.(png|jpe?g|gif|webp|avif|bmp|ico)$/i.test(path);
+
+/** An image the replay cannot type in: shown as it is, not as bytes. */
+function ImagePreview({ src, note }: { src: string; note?: string }) {
+  const [failed, setFailed] = React.useState(false);
+  if (failed)
+    return <Message>This image could not be read from the repository.</Message>;
+  return (
+    <figure className="flex h-full flex-col items-center justify-center gap-3 overflow-auto p-8">
+      <img
+        src={src}
+        alt=""
+        onError={() => setFailed(true)}
+        className="max-h-full max-w-full rounded-control object-contain shadow-popover"
+      />
+      {note ? <figcaption className="text-2xs text-text-low">{note}</figcaption> : null}
+    </figure>
   );
 }
 

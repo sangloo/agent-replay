@@ -109,9 +109,9 @@ describe("sessions from every agent", () => {
     expect(findSession("gem00001", homes())?.agent).toBe("gemini-cli");
   });
 
-  it("captures a Codex session end to end", () => {
+  it("captures a Codex session end to end", async () => {
     const session = findSession("codex-thread-1", homes())!;
-    const { replay } = captureSession({ session });
+    const { replay } = await captureSession({ session });
     expect(replay.source).toBe("codex");
     expect(replay.steps.map((s) => s.kind)).toEqual(["prompt", "edit"]);
     const playback = play(replay);

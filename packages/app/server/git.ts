@@ -5,18 +5,24 @@
  * answer — a directory that is not a repository, a commit that is gone, a
  * reflog that was expired. A capture without git still works; it just
  * cannot reconcile, and says so.
+ *
+ * The questions only a capture asks answer with a promise: a capture asks
+ * several at once, and each is a git process that mostly waits on the disk.
+ * The rest answer at once, for the service and the CLI.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { readFileSync, openSync, closeSync, fstatSync, readSync } from "node:fs";
 import { join } from "node:path";
 
 import { REPLAY_DIR, type Commit } from "@agent-replay/core";
 
+const MAX_OUTPUT = 512 * 1024 * 1024;
+
 function git(root: string, args: string[]): Buffer | undefined {
   try {
     return execFileSync("git", ["-C", root, ...args], {
-      maxBuffer: 512 * 1024 * 1024,
+      maxBuffer: MAX_OUTPUT,
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
@@ -28,6 +34,30 @@ function text(root: string, args: string[]): string | undefined {
   return git(root, args)?.toString("utf8").trim();
 }
 
+/** `git` without waiting on it, `undefined` when it fails just the same. */
+function gitAsync(
+  root: string,
+  args: string[],
+  input?: string,
+  maxBuffer = MAX_OUTPUT,
+): Promise<Buffer | undefined> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      "git",
+      ["-C", root, ...args],
+      { encoding: "buffer", maxBuffer },
+      (error, stdout) => resolve(error ? undefined : stdout),
+    );
+    // A git that fails before reading its input closes the pipe under us.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(input);
+  });
+}
+
+async function textAsync(root: string, args: string[]): Promise<string | undefined> {
+  return (await gitAsync(root, args))?.toString("utf8").trim();
+}
+
 /** Binary content is kept as a NUL marker so a capture leaves it out. */
 function decode(buffer: Buffer): string {
   return buffer.includes(0) ? "\u0000binary" : buffer.toString("utf8");
@@ -37,8 +67,9 @@ export function repoRoot(dir: string): string | undefined {
   return text(dir, ["rev-parse", "--show-toplevel"]) || undefined;
 }
 
-export function head(root: string): string | undefined {
-  return text(root, ["rev-parse", "HEAD"]) || undefined;
+/** The commit HEAD points at; `undefined` before the first commit. */
+export async function head(root: string): Promise<string | undefined> {
+  return (await textAsync(root, ["rev-parse", "HEAD"])) || undefined;
 }
 
 export function branch(root: string): string | undefined {
@@ -57,10 +88,10 @@ export function resolve(root: string, rev: string): string | undefined {
  * reflog does not reach back that far, the parent of the first commit made
  * since is the next best answer, and HEAD itself when nothing was committed.
  */
-export function headAt(root: string, time: string): string | undefined {
+export async function headAt(root: string, time: string): Promise<string | undefined> {
   const at = Date.parse(time);
   if (Number.isNaN(at)) return head(root);
-  const reflog = text(root, [
+  const reflog = await textAsync(root, [
     "reflog",
     "show",
     "--date=iso-strict",
@@ -72,13 +103,18 @@ export function headAt(root: string, time: string): string | undefined {
     const when = /\{(.+)\}$/.exec(selector ?? "")?.[1];
     if (sha && when && Date.parse(when) <= at) return sha;
   }
-  const since = text(root, [
-    "rev-list",
-    "--reverse",
-    `--since=${new Date(at).toISOString()}`,
-    "HEAD",
-  ])?.split("\n")[0];
-  if (since) return resolve(root, `${since}^`) ?? since;
+  const since = (
+    await textAsync(root, [
+      "rev-list",
+      "--reverse",
+      `--since=${new Date(at).toISOString()}`,
+      "HEAD",
+    ])
+  )?.split("\n")[0];
+  if (since)
+    return (
+      (await textAsync(root, ["rev-parse", "--verify", `${since}^^{commit}`])) || since
+    );
   return head(root);
 }
 
@@ -122,24 +158,55 @@ export function readWorking(
   }
 }
 
+const nulList = (out: string | undefined) =>
+  (out ?? "").split("\u0000").filter(Boolean);
+
+/**
+ * Files in the working tree that git neither tracks nor ignores. Listing them
+ * walks the whole working tree — in a large checkout, most of a capture's
+ * time — so a capture lists them once and hands the list on.
+ */
+export async function untrackedFiles(root: string): Promise<string[]> {
+  return nulList(
+    await textAsync(root, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  );
+}
+
+/** Untracked files, listed already or still being listed. */
+type Untracked = readonly string[] | Promise<readonly string[]>;
+
 /**
  * Paths that differ between `base` and `end` — or the working tree, untracked
  * files included, when there is no `end`.
  */
-export function changedFiles(root: string, base: string, end?: string): string[] {
-  const split = (out: string | undefined) =>
-    (out ?? "").split("\u0000").filter(Boolean);
+export async function changedFiles(
+  root: string,
+  base: string,
+  end?: string,
+  /** The working tree's untracked files, when they are already being listed. */
+  untracked?: Untracked,
+): Promise<string[]> {
   if (end) {
-    return split(text(root, ["diff", "--name-only", "-z", base, end]));
+    return nulList(await textAsync(root, ["diff", "--name-only", "-z", base, end]));
   }
-  return [
-    ...split(text(root, ["diff", "--name-only", "-z", base])),
-    ...split(text(root, ["ls-files", "--others", "--exclude-standard", "-z"])),
-  ];
+  const [tracked, others] = await Promise.all([
+    textAsync(root, ["diff", "--name-only", "-z", base]),
+    untracked ?? untrackedFiles(root),
+  ]);
+  return [...nulList(tracked), ...others];
 }
 
-export function commitsBetween(root: string, base: string, end: string): Commit[] {
-  const out = text(root, ["log", "--reverse", "--format=%H%x09%s", `${base}..${end}`]);
+export async function commitsBetween(
+  root: string,
+  base: string,
+  end: string,
+): Promise<Commit[]> {
+  const out = await textAsync(root, [
+    "log",
+    "--reverse",
+    "--format=%H%x09%s",
+    `${base}..${end}`,
+  ]);
   return (out ?? "")
     .split("\n")
     .filter(Boolean)
@@ -149,12 +216,29 @@ export function commitsBetween(root: string, base: string, end: string): Commit[
     });
 }
 
-/** Uncommitted changes — not counting replays, which are written after the work. */
-export function isDirty(root: string): boolean {
+/**
+ * Uncommitted changes — not counting replays, which are written after the work.
+ *
+ * Given the untracked files already listed, git is asked only about tracked
+ * ones, which does not walk the working tree a second time — and is not asked
+ * at all when an untracked file already answers.
+ */
+export async function isDirty(root: string, untracked?: Untracked): Promise<boolean> {
+  const pathspec = ["--", ".", `:(exclude)${REPLAY_DIR}`];
+  if (!untracked)
+    return Boolean(await textAsync(root, ["status", "--porcelain", ...pathspec]));
+  if ((await untracked).some((path) => path.split("/")[0] !== REPLAY_DIR)) return true;
   return Boolean(
-    text(root, ["status", "--porcelain", "--", ".", `:(exclude)${REPLAY_DIR}`]),
+    await textAsync(root, [
+      "status",
+      "--porcelain",
+      "--untracked-files=no",
+      ...pathspec,
+    ]),
   );
 }
+
+const BLOB_OUTPUT = 2 * 1024 * 1024 * 1024;
 
 /**
  * Many files at many commits in one `git cat-file --batch` process — a first
@@ -165,19 +249,43 @@ export function readBlobs(
   root: string,
   specs: readonly string[],
 ): Map<string, string | null> {
-  const out = new Map<string, string | null>();
-  if (specs.length === 0) return out;
+  if (specs.length === 0) return new Map();
   const unique = [...new Set(specs)];
   let buffer: Buffer;
   try {
     buffer = execFileSync("git", ["-C", root, "cat-file", "--batch"], {
       input: `${unique.join("\n")}\n`,
-      maxBuffer: 2 * 1024 * 1024 * 1024,
+      maxBuffer: BLOB_OUTPUT,
       stdio: ["pipe", "pipe", "ignore"],
     });
   } catch {
-    return out;
+    return new Map();
   }
+  return batchAnswers(buffer, unique);
+}
+
+/** `readBlobs`, without waiting on git. */
+async function readBlobsAsync(
+  root: string,
+  specs: readonly string[],
+): Promise<Map<string, string | null>> {
+  if (specs.length === 0) return new Map();
+  const unique = [...new Set(specs)];
+  const buffer = await gitAsync(
+    root,
+    ["cat-file", "--batch"],
+    `${unique.join("\n")}\n`,
+    BLOB_OUTPUT,
+  );
+  return buffer ? batchAnswers(buffer, unique) : new Map();
+}
+
+/** `cat-file --batch` output, one answer per spec in the order asked. */
+function batchAnswers(
+  buffer: Buffer,
+  unique: readonly string[],
+): Map<string, string | null> {
+  const out = new Map<string, string | null>();
   let at = 0;
   for (const spec of unique) {
     const eol = buffer.indexOf(10, at);
@@ -283,26 +391,33 @@ export function filesAt(root: string, rev: string): string[] {
     .filter(Boolean);
 }
 
+/** Every path in the index. */
+export async function trackedFiles(root: string): Promise<Set<string>> {
+  const indexed = await gitAsync(root, ["ls-files", "--cached", "-z"]);
+  return new Set(indexed?.toString("utf8").split("\u0000") ?? []);
+}
+
 /** Which of `paths` git ignores — secrets like `.env.local` live there. */
-export function ignored(root: string, paths: readonly string[]): Set<string> {
+export async function ignored(
+  root: string,
+  paths: readonly string[],
+  /** The index's paths, when they are already being listed. */
+  tracked?: Promise<Set<string>>,
+): Promise<Set<string>> {
   if (paths.length === 0) return new Set();
   // check-ignore excludes tracked files by definition. Remove them in bulk
   // rather than making it consult the index independently for thousands of paths.
-  const indexed = git(root, ["ls-files", "--cached", "-z"]);
-  const tracked = new Set(indexed?.toString("utf8").split("\u0000") ?? []);
-  const candidates = paths.filter((path) => !tracked.has(path));
+  const indexed = await (tracked ?? trackedFiles(root));
+  const candidates = paths.filter((path) => !indexed.has(path));
   if (!candidates.length) return new Set();
-  try {
-    const out = execFileSync("git", ["-C", root, "check-ignore", "--stdin", "-z"], {
-      input: candidates.join("\u0000"),
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ["pipe", "pipe", "ignore"],
-    });
-    return new Set(out.toString("utf8").split("\u0000").filter(Boolean));
-  } catch {
-    // Exit 1 means "none of them"; anything else means we cannot tell.
-    return new Set();
-  }
+  const out = await gitAsync(
+    root,
+    ["check-ignore", "--stdin", "-z"],
+    candidates.join("\u0000"),
+    64 * 1024 * 1024,
+  );
+  // Exit 1 means "none of them"; anything else means we cannot tell.
+  return new Set(nulList(out?.toString("utf8")));
 }
 
 /**
@@ -321,37 +436,45 @@ export function ignored(root: string, paths: readonly string[]): Set<string> {
  * "brought in" side is the session's own files. Without a reflog,
  * first-parent merge commits are the best evidence there is.
  */
-export function mergedIn(
+export async function mergedIn(
   root: string,
   base: string,
   end: string,
   working = false,
-): Set<string> {
-  const isAncestor = (a: string, b: string) =>
-    git(root, ["merge-base", "--is-ancestor", a, b]) !== undefined;
-  const within = ([from, to]: [string, string]) =>
-    isAncestor(base, from) && isAncestor(to, end);
-  const names = (...args: string[]) =>
-    (text(root, ["diff", "--name-only", "-z", ...args]) ?? "")
-      .split("\u0000")
-      .filter(Boolean);
-  const log = reflog(root);
+  /** The branch's reflog, when it is already being read. */
+  moves: Promise<ReflogEntry[]> = reflog(root),
+): Promise<Set<string>> {
+  // One question after another, as the answers decide what to ask next; the
+  // capture asks other things meanwhile.
+  const isAncestor = async (a: string, b: string) =>
+    (await gitAsync(root, ["merge-base", "--is-ancestor", a, b])) !== undefined;
+  const within = async ([from, to]: [string, string]) =>
+    (await isAncestor(base, from)) && (await isAncestor(to, end));
+  const names = async (...args: string[]) =>
+    nulList(await textAsync(root, ["diff", "--name-only", "-z", ...args]));
+  const log = await moves;
 
   if (!log.some((entry) => entry.sha === end)) {
     const paths = new Set<string>();
     for (const merge of (
-      text(root, ["rev-list", "--merges", "--first-parent", `${base}..${end}`]) ?? ""
+      (await textAsync(root, [
+        "rev-list",
+        "--merges",
+        "--first-parent",
+        `${base}..${end}`,
+      ])) ?? ""
     )
       .split("\n")
       .filter(Boolean)) {
-      for (const path of names(`${merge}^1`, merge)) paths.add(path);
+      for (const path of await names(`${merge}^1`, merge)) paths.add(path);
     }
     return paths;
   }
 
   const arrived = new Set<string>();
-  for (const range of arrivals(log).filter(within)) {
-    for (const path of names(...range)) arrived.add(path);
+  for (const range of arrivals(log)) {
+    if (!(await within(range))) continue;
+    for (const path of await names(...range)) arrived.add(path);
   }
   if (arrived.size === 0) return arrived;
   const own = new Set<string>();
@@ -360,14 +483,14 @@ export function mergedIn(
     if (!/^commit( \(amend\))?:/.test(subject) || inspected.has(sha)) continue;
     inspected.add(sha);
     const range: [string, string] = [`${sha}^1`, sha];
-    if (!within(range)) continue;
-    for (const path of names(...range)) own.add(path);
+    if (!(await within(range))) continue;
+    for (const path of await names(...range)) own.add(path);
   }
-  if (working) for (const path of names("HEAD")) own.add(path);
+  if (working) for (const path of await names("HEAD")) own.add(path);
   return new Set([...arrived].filter((path) => !own.has(path)));
 }
 
-interface ReflogEntry {
+export interface ReflogEntry {
   sha: string;
   subject: string;
 }
@@ -377,17 +500,17 @@ interface ReflogEntry {
  * reflog, which holds only what happened to it; HEAD's also holds commits
  * made on other branches in the same clone. HEAD's when it is detached.
  */
-function reflog(root: string): ReflogEntry[] {
-  const branch = text(root, ["symbolic-ref", "-q", "HEAD"]);
+export async function reflog(root: string): Promise<ReflogEntry[]> {
+  const branch = await textAsync(root, ["symbolic-ref", "-q", "HEAD"]);
   return (
-    text(root, [
+    (await textAsync(root, [
       "reflog",
       "show",
       "-n",
       "1000",
       "--format=%H%x09%gs",
       branch || "HEAD",
-    ]) ?? ""
+    ])) ?? ""
   )
     .split("\n")
     .filter(Boolean)
@@ -415,15 +538,22 @@ function arrivals(log: readonly ReflogEntry[]): [string, string][] {
   return ranges;
 }
 
+/** A revision's whole tree, as `ls-tree` lists it — what `readFilesAt` reads from. */
+export function listTree(root: string, rev: string): Promise<Buffer | undefined> {
+  return gitAsync(root, ["ls-tree", "-r", "-z", rev]);
+}
+
 /** Resolve a revision's tree once instead of traversing it once per missing path. */
-export function readFilesAt(
+export async function readFilesAt(
   root: string,
   rev: string,
   paths: readonly string[],
-): Map<string, string | null> {
-  const listing = git(root, ["ls-tree", "-r", "-z", rev]);
+  /** The tree's listing, when it is already being read. */
+  tree: Promise<Buffer | undefined> = listTree(root, rev),
+): Promise<Map<string, string | null>> {
+  const listing = await tree;
   if (!listing)
-    return readBlobs(
+    return readBlobsAsync(
       root,
       paths.map((path) => `${rev}:${path}`),
     );
@@ -437,7 +567,7 @@ export function readFilesAt(
     const [, type, sha] = entry.slice(0, tab).split(" ");
     if (type === "blob" && sha) objects.set(path, sha);
   }
-  const blobs = readBlobs(root, [...objects.values()]);
+  const blobs = await readBlobsAsync(root, [...objects.values()]);
   return new Map(
     paths.map((path) => [
       `${rev}:${path}`,

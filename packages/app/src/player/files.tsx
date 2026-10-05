@@ -1,6 +1,6 @@
 import type { FileEntry } from "@agent-replay/core";
 import { cn, IconButton, Input, Tree } from "@/ui";
-import { ChevronsDownUp, File, Folder, FolderOpen } from "lucide-react";
+import { ChevronsDownUp, File, Folder, FolderOpen, PanelLeftClose } from "lucide-react";
 import * as React from "react";
 
 import { Choice } from "../choice";
@@ -81,6 +81,8 @@ export interface FilesPanelProps {
   active?: string;
   onSelect: (path: string) => void;
   filterRef?: React.Ref<HTMLInputElement>;
+  /** Close the panel — from its own bar, where the reader is looking. */
+  onHide?: () => void;
 }
 
 /**
@@ -97,6 +99,7 @@ export function FilesPanel({
   active,
   onSelect,
   filterRef,
+  onHide,
 }: FilesPanelProps) {
   const [scope, setScope] = React.useState<"changes" | "all">("changes");
   const [query, setQuery] = React.useState("");
@@ -146,12 +149,21 @@ export function FilesPanel({
           label="Collapse all folders"
           variant="ghost"
           size="sm"
-
           className="ml-auto"
           onClick={() => setCollapse((n) => n + 1)}
         >
           <ChevronsDownUp />
         </IconButton>
+        {onHide ? (
+          <IconButton
+            label="Hide files ( [ )"
+            variant="ghost"
+            size="sm"
+            onClick={onHide}
+          >
+            <PanelLeftClose />
+          </IconButton>
+        ) : null}
       </div>
       <div className="shrink-0 px-2 pb-2">
         <Input
@@ -191,7 +203,7 @@ export function FilesPanel({
         <button
           type="button"
           onClick={() => setUpcoming(!upcoming)}
-          className="shrink-0 border-t border-line px-4 py-2 text-left text-2xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
+          className="shrink-0 px-4 py-2.5 text-left text-2xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
         >
           {upcoming
             ? "Hide the files changed later"

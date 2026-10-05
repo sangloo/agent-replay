@@ -35,3 +35,13 @@ export function libraryHash(params: LibraryParams): string {
   const text = search.toString();
   return text ? `#/?${text}` : "#/";
 }
+
+/**
+ * Learn's address: the project its courses are from (empty for all of them,
+ * as in the library) and the course map open, if one is — so switching tabs
+ * keeps the project, and Back returns to the same list.
+ */
+export function learnHash(project: string, key?: string): string {
+  const search = project ? `?${new URLSearchParams({ project })}` : "";
+  return `#/learn${key ? `/${key}` : ""}${search}`;
+}

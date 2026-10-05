@@ -1,8 +1,15 @@
 import * as React from "react";
 
-import { ThemeContext, type Theme, type ThemeState } from "./use-theme";
+import {
+  ACCENTS,
+  ThemeContext,
+  type Accent,
+  type Theme,
+  type ThemeState,
+} from "./use-theme";
 
 const KEY = "theme";
+const ACCENT_KEY = "accent";
 
 function stored(): Theme {
   try {
@@ -13,14 +20,34 @@ function stored(): Theme {
   }
 }
 
+function storedAccent(): Accent {
+  try {
+    const value = localStorage.getItem(ACCENT_KEY);
+    return ACCENTS.find((accent) => accent === value) ?? "mono";
+  } catch {
+    return "mono";
+  }
+}
+
+function remember(key: string, value: string | undefined) {
+  try {
+    if (value === undefined) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Private mode: the choice lasts the page.
+  }
+}
+
 const media = () => window.matchMedia("(prefers-color-scheme: dark)");
 
 /**
- * Light, dark or the system's, as the `.dark` class on <html>. `index.html`
- * applies the stored choice before the first paint; this keeps it current.
+ * Light, dark or the system's, as the `.dark` class on <html>, and the
+ * accent as its `data-accent`. `index.html` applies the stored choices
+ * before the first paint; this keeps them current.
  */
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = React.useState<Theme>(stored);
+  const [accent, setAccentState] = React.useState<Accent>(storedAccent);
   const [systemDark, setSystemDark] = React.useState(() => media().matches);
   React.useEffect(() => {
     const query = media();
@@ -34,21 +61,26 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     root.classList.toggle("dark", resolvedTheme === "dark");
     root.classList.toggle("light", resolvedTheme === "light");
   }, [resolvedTheme]);
+  React.useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (accent === "mono") root.removeAttribute("data-accent");
+    else root.setAttribute("data-accent", accent);
+  }, [accent]);
   const value = React.useMemo<ThemeState>(
     () => ({
       theme,
       resolvedTheme,
       setTheme: (next) => {
         setThemeState(next);
-        try {
-          if (next === "system") localStorage.removeItem(KEY);
-          else localStorage.setItem(KEY, next);
-        } catch {
-          // Private mode: the choice lasts the page.
-        }
+        remember(KEY, next === "system" ? undefined : next);
+      },
+      accent,
+      setAccent: (next) => {
+        setAccentState(next);
+        remember(ACCENT_KEY, next === "mono" ? undefined : next);
       },
     }),
-    [theme, resolvedTheme],
+    [theme, resolvedTheme, accent],
   );
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

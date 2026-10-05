@@ -21,9 +21,12 @@ import * as React from "react";
 
 import { api, rememberTitle, useLoad, type SavedListing } from "./api";
 import { AppHeader } from "./app-header";
+import { FolderDialog } from "./folder-dialog";
 import { ago } from "./labels";
 import { ProgressMark } from "./library";
+import { learnHash, libraryHash } from "./library-params";
 import { ProgressVersion } from "./progress-sync";
+import { ProjectPicker } from "./project-picker";
 import {
   courseProgress,
   fractionOf,
@@ -31,29 +34,81 @@ import {
   listedProgress,
   type StudyProgress,
 } from "./study-progress";
-import { ThemeToggle } from "./theme-toggle";
+import { AppearanceMenu } from "./appearance";
 
-const loadCourses = () => api.replays("agent=course&limit=100");
 /** Lessons a course map mounts at a time. */
 const BATCH = 24;
 
 /**
  * Learn: every course on this machine and how far along each one is — the
- * same place as Sessions and Saved, one tab over, not a separate tool.
+ * same place as Sessions and Saved, one tab over, not a separate tool. Like
+ * them it is about the project chosen in the picker, or all of them.
  */
-export function CourseLibrary({ courseKey }: { courseKey?: string }) {
-  const catalog = useLoad("curricula", api.curricula);
+export function CourseLibrary({
+  courseKey,
+  project,
+  onProject,
+}: {
+  courseKey?: string;
+  /** A repository's root; empty for all of them. */
+  project: string;
+  onProject: (root: string) => void;
+}) {
+  // An open map is asked for by its own key, so it is found whichever
+  // project is chosen; the list, by the project.
+  const catalog = useLoad(
+    new URLSearchParams(
+      courseKey ? { key: courseKey } : project ? { project } : {},
+    ).toString(),
+    api.curricula,
+  );
   // Redraw when progress kept elsewhere arrives.
   React.useContext(ProgressVersion);
-  const courses = useLoad("courses", loadCourses);
+  const courses = useLoad(
+    new URLSearchParams({
+      agent: "course",
+      limit: "100",
+      ...(project ? { project } : {}),
+    }).toString(),
+    api.replays,
+  );
+  const [refresh, setRefresh] = React.useState(0);
+  const projects = useLoad(`projects:${refresh}`, api.projects);
+  const [opening, setOpening] = React.useState(false);
   const course =
     courseKey && catalog.state === "ready"
       ? catalog.data.courses.find((c) => c.key === courseKey)
       : undefined;
   return (
-    <div className="flex h-dvh flex-col bg-surface-base text-text-high">
-      <AppHeader place="learn" />
-      <div id="study-content" className="min-h-0 flex-1 overflow-y-auto">
+    <div className="flex h-dvh flex-col bg-surface-low text-text-high">
+      <AppHeader
+        place="learn"
+        hrefOf={(place) =>
+          place === "learn"
+            ? learnHash(project)
+            : libraryHash({ tab: place, q: "", agent: "", project, page: 1 })
+        }
+        picker={
+          <ProjectPicker
+            projects={projects.state === "ready" ? projects.data : []}
+            value={project}
+            onChange={onProject}
+            onOpenFolder={() => setOpening(true)}
+          />
+        }
+      />
+      <FolderDialog
+        open={opening}
+        onOpenChange={setOpening}
+        onAdded={(added) => {
+          setRefresh((n) => n + 1);
+          onProject(added.root);
+        }}
+      />
+      <div
+        id="study-content"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-surface-base shadow-sheet sm:mx-2 sm:mb-2 sm:rounded-surface"
+      >
         {catalog.state === "loading" || (courses.state === "loading" && !courseKey) ? (
           <p
             role="status"
@@ -69,9 +124,24 @@ export function CourseLibrary({ courseKey }: { courseKey?: string }) {
             {catalog.message}
           </p>
         ) : course ? (
-          <CourseMap key={course.key} course={course} back />
+          <CourseMap key={course.key} course={course} back={learnHash(project)} />
+        ) : courseKey ? (
+          // A map that is no longer there — moved, or its folder forgotten.
+          <p
+            role="status"
+            className="mx-auto max-w-4xl px-6 py-10 text-sm text-text-mid"
+          >
+            This course map is not here any more.{" "}
+            <a
+              href={learnHash(project)}
+              className="rounded-control font-medium text-text-high underline decoration-line-high underline-offset-2 focus-bar hover:decoration-text-mid"
+            >
+              See every course
+            </a>
+          </p>
         ) : (
           <LearnHome
+            project={project}
             maps={catalog.data.courses}
             problems={catalog.data.problems}
             courses={courses.state === "ready" ? courses.data.items : []}
@@ -128,10 +198,12 @@ function resumeOf(maps: readonly StudyCourse[], courses: readonly SavedListing[]
 }
 
 function LearnHome({
+  project,
   maps,
   problems,
   courses,
 }: {
+  project: string;
   maps: readonly StudyCourse[];
   problems: readonly { project: string; message: string }[];
   courses: readonly SavedListing[];
@@ -164,7 +236,7 @@ function LearnHome({
       {resume ? (
         <section
           aria-label="Continue learning"
-          className="flex items-center gap-6 rounded-panel border border-line bg-surface-low p-5"
+          className="flex items-center gap-6 rounded-panel bg-surface-mid p-5"
         >
           <span className="grid size-10 shrink-0 place-items-center rounded-full bg-emphasis-subtle text-emphasis">
             <BookOpen aria-hidden className="size-5" />
@@ -207,8 +279,8 @@ function LearnHome({
               return (
                 <li key={map.key}>
                   <a
-                    href={`#/learn/${map.key}`}
-                    className="flex h-full flex-col gap-3 rounded-panel border border-line p-4 focus-bar hover:border-line-high hover:bg-hover"
+                    href={learnHash(project, map.key)}
+                    className="flex h-full flex-col gap-3 rounded-panel bg-surface-mid p-4 focus-bar transition-colors duration-fast hover:bg-active"
                   >
                     <span className="flex items-start gap-2.5">
                       <GraduationCap
@@ -279,11 +351,13 @@ function LearnHome({
               <p>
                 {maps.length
                   ? "Every course here is part of a course map above."
-                  : "No courses yet. Ask your agent to teach you a repository:"}
+                  : project
+                    ? "No courses in this project yet. Ask your agent to teach it to you:"
+                    : "No courses yet. Ask your agent to teach you a repository:"}
               </p>
               {maps.length ? null : (
                 <>
-                  <p className="rounded-control border border-line bg-surface-low px-3 py-2 text-text-high">
+                  <p className="rounded-control bg-surface-mid px-3 py-2 text-text-high">
                     “Teach me this repository. Build it up from scratch as a course.”
                   </p>
                   <p className="text-xs text-text-low">
@@ -340,8 +414,8 @@ export function CourseMap({
 }: {
   course: StudyCourse;
   exportBase?: string;
-  /** Offer the way back to the Learn page. */
-  back?: boolean;
+  /** The Learn page to offer the way back to. */
+  back?: string;
 }) {
   const { curriculum } = course;
   const progress = courseProgress(curriculum.id, curriculum.revision);
@@ -426,7 +500,7 @@ export function CourseMap({
     <main className="mx-auto flex max-w-4xl flex-col gap-8 px-6 pt-6 pb-24">
       {back ? (
         <a
-          href="#/learn"
+          href={back}
           className="-ml-2 flex items-center gap-1.5 self-start rounded-control px-2 py-1 text-xs text-text-low focus-bar hover:bg-hover hover:text-text-high"
         >
           <ArrowLeft aria-hidden className="size-3.5" />
@@ -450,7 +524,7 @@ export function CourseMap({
       {next && link(next) ? (
         <section
           aria-label="Continue learning"
-          className="flex items-center gap-6 rounded-panel border border-line bg-surface-low p-5"
+          className="flex items-center gap-6 rounded-panel bg-surface-mid p-5"
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <p className="text-2xs font-medium tracking-wide text-text-low uppercase">
@@ -476,7 +550,7 @@ export function CourseMap({
           </a>
         </section>
       ) : (
-        <p className="rounded-panel border border-line bg-surface-low p-5 text-sm text-text-mid">
+        <p className="rounded-panel bg-surface-mid p-5 text-sm text-text-mid">
           {all.some((l) => link(l))
             ? "Every available lesson is done. Revisit any of them below."
             : "No lessons are available to open yet. The outline is below."}
@@ -516,13 +590,16 @@ export function CourseMap({
             <h2 className="text-lg font-semibold tracking-tight">{chapter.title}</h2>
             <p className="max-w-prose text-sm text-text-mid">{chapter.description}</p>
           </div>
-          <ol className="study-lessons flex flex-col border-t border-line">
+          <ol className="study-lessons -mx-3 flex flex-col gap-0.5">
             {lessons.map((l) => {
               const href = link(l);
               const status = statusOf(l);
               const percent = percentOf(l);
               return (
-                <li key={l.id} className="flex gap-3 border-b border-line py-3">
+                <li
+                  key={l.id}
+                  className="flex gap-3 rounded-panel px-3 py-3 hover:bg-hover"
+                >
                   <span className="flex w-6 shrink-0 justify-center pt-0.5">
                     <StatusIcon status={status} />
                   </span>
@@ -617,13 +694,16 @@ export function StandaloneCourseLibrary({
   exportBase: string;
 }) {
   return (
-    <div className="flex h-dvh flex-col bg-surface-base text-text-high">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
+    <div className="flex h-dvh flex-col bg-surface-low text-text-high">
+      <header className="flex h-12 shrink-0 items-center gap-3 px-4">
         <span className="mr-auto text-sm font-semibold">Replay · Learn</span>
         <span className="text-xs text-text-low">Companion lesson library</span>
-        <ThemeToggle />
+        <AppearanceMenu />
       </header>
-      <div id="study-content" className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        id="study-content"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-surface-base shadow-sheet sm:mx-2 sm:mb-2 sm:rounded-surface"
+      >
         <CourseMap
           course={{ key: "", curriculum, unavailable: [] }}
           exportBase={exportBase}

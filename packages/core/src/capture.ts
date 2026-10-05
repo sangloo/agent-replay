@@ -58,6 +58,13 @@ export interface CaptureOptions {
    * reconciliation, and changes made purely by commands are missing.
    */
   readFinal?: (path: string) => string | null;
+  /**
+   * When a file was last written, as an ISO time — its modification time.
+   * A change no recorded command explains is placed at that moment rather
+   * than at the end, so edits made outside the session's tools (another
+   * agent, an editor, a script) show up when they happened.
+   */
+  modifiedAt?: (path: string) => string | undefined;
   /** Repo-relative paths git reports changed between base and end. */
   changed?: readonly string[];
   /** Include the agent's thinking in `why`, when the transcript kept it. */
@@ -76,6 +83,17 @@ export interface CaptureOptions {
   maxFileBytes?: number;
   /** Command output beyond this is truncated. Default 4,000 characters. */
   maxOutputChars?: number;
+}
+
+/** The last step at or before `time`; -1 when every step is later. */
+function lastStepBy(steps: readonly Step[], time: string): number | undefined {
+  const t = Date.parse(time);
+  if (Number.isNaN(t)) return undefined;
+  let found = -1;
+  steps.forEach((step, i) => {
+    if (Date.parse(step.at) <= t) found = i;
+  });
+  return found;
 }
 
 function posix(path: string): string {
@@ -454,12 +472,24 @@ export function capture(
       }
       const final = options.readFinal(path);
       if (final === state.get(path)) continue;
-      const cause = causeOf(path, lastTouch.get(path) ?? -1);
-      const anchor = cause >= 0 ? steps[cause]! : steps[steps.length - 1];
+      const touched = lastTouch.get(path) ?? -1;
+      const cause = causeOf(path, touched);
+      const modified = cause < 0 ? options.modifiedAt?.(path) : undefined;
+      const bySlot = modified === undefined ? undefined : lastStepBy(steps, modified);
+      // Never ahead of the last recorded edit to the file: the edit would
+      // then apply to the final content rather than lead up to it.
+      const slot =
+        cause >= 0
+          ? cause
+          : bySlot === undefined
+            ? steps.length - 1
+            : Math.max(touched, bySlot);
+      const timely = slot === bySlot && slot < steps.length - 1;
+      const anchor = steps[slot] ?? steps[0];
       const step: ExternalStep = {
         kind: "external",
         id: `untracked:${path}`,
-        at: anchor?.at ?? main.endedAt ?? "",
+        at: timely ? modified! : (anchor?.at ?? main.endedAt ?? ""),
         agent: anchor?.agent ?? "main",
         turn: anchor?.turn ?? turn,
         path,
@@ -467,7 +497,6 @@ export function capture(
         reason: "untracked",
       };
       if (cause >= 0) step.cause = steps[cause]!.id;
-      const slot = cause >= 0 ? cause : steps.length - 1;
       inserts.set(slot, [...(inserts.get(slot) ?? []), step]);
       state.set(path, final);
     }

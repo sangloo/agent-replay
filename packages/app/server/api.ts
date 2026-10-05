@@ -13,6 +13,9 @@
  *   GET    /api/folders?path=         the folders in a folder, to choose one
  *   GET    /api/progress              where the reader is in each replay
  *   PUT    /api/progress              merge positions in: { "entries": { key: … } }
+ *   GET    /api/curricula             course maps: ?project= (a repository's
+ *                                     root), ?key= (a saved replay's folder),
+ *                                     or every known repository's
  *
  *   GET    /api/replays               saved replays, in every known repository
  *   GET    /api/replays/:id           one saved replay
@@ -23,6 +26,9 @@
  *   GET    /api/{replays,sessions}/:id/tree   every file in the repository at
  *                                             the replay's base commit
  *   GET    /api/{replays,sessions}/:id/file   one of them (?rev=&path=)
+ *   GET    /api/{replays,sessions}/:id/image  an image's bytes, for an <img>
+ *                                             (?path=, and ?rev= or the
+ *                                             working tree)
  *   GET    /api/{replays,sessions}/:id/export the replay as one HTML file
  *
  * The two listings take `?q=` (every word must match), `?agent=`,
@@ -31,10 +37,12 @@
  * the search matched.
  */
 
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { realpathSync } from "node:fs";
-import { basename } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, extname, join, sep } from "node:path";
 
 import {
   curriculumLessons,
@@ -50,10 +58,12 @@ import { exportHtml, hasPlayer } from "./export.ts";
 import * as git from "./git.ts";
 import {
   addProject,
+  folderName,
   listFolders,
   projectName,
   readAdded,
   removeProject,
+  replayFolders,
   rootOf,
   type FolderListing,
 } from "./projects.ts";
@@ -91,7 +101,10 @@ export interface SavedListing {
   replayId: string;
   /** The revision its steps arrive at, which a course's progress is kept by. */
   revision?: string;
-  /** The repository's name, and its root. */
+  /**
+   * The repository's name — with the folder, when saved in one nested in it
+   * (`app/tutorials/backend`) — and the repository's root.
+   */
   repo: string;
   project: string;
   /** Which agent's session: `claude-code`, `codex`, … */
@@ -143,7 +156,7 @@ export interface Project {
   name: string;
   /** Agent sessions that ran in it, on this machine. */
   sessions: number;
-  /** Replays saved in its `.replays/`. */
+  /** Replays saved in its `.replays/` (and, opened by hand, in nested ones). */
   saved: number;
   lastActive?: string;
   /** Added by hand — the only kind that can be forgotten. */
@@ -166,6 +179,52 @@ export interface RepoFile {
 const PAGE = 25;
 const MAX_PAGE = 100;
 const MAX_FILE_BYTES = 1024 * 1024;
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  svg: "image/svg+xml",
+};
+
+/**
+ * An image's bytes: at a commit, or as the working tree has it. Asynchronous,
+ * unlike the text reads, so a large picture never holds up the service.
+ */
+async function imageBytes(root: string, path: string, rev?: string): Promise<Buffer> {
+  if (rev) {
+    return new Promise((resolve, reject) =>
+      execFile(
+        "git",
+        ["-C", root, "show", `${rev}:${path}`],
+        { encoding: "buffer", maxBuffer: MAX_IMAGE_BYTES },
+        (error, stdout) =>
+          error
+            ? reject(new Problem(404, "not_found", `No ${path} at ${rev}.`))
+            : resolve(stdout),
+      ),
+    );
+  }
+  // A link in the repository must not lead the read out of it.
+  let real: string;
+  try {
+    real = realpathSync(join(root, path));
+  } catch {
+    throw new Problem(404, "not_found", `No ${path}.`);
+  }
+  if (!real.startsWith(realpathSync(root) + sep))
+    throw new Problem(400, "invalid_request", "Not a path in the repository.");
+  const bytes = await readFile(real);
+  if (bytes.length > MAX_IMAGE_BYTES)
+    throw new Problem(413, "too_large", "This image is too large to show.");
+  return bytes;
+}
 
 function count(value: string | null, fallback: number, max: number): number {
   if (value === null || value === "") return fallback;
@@ -297,8 +356,39 @@ export function createHandler(options: ReplayApiOptions) {
     for (const root of roots) byKey.set(idKey(root), root);
     return roots;
   };
+  // The repositories it was started for, and those opened by hand, are
+  // searched a few levels down for replays kept in a folder of their own
+  // (see replayFolders); one a session merely ran in is read at its root,
+  // unless it is the one chosen — walking dozens of them for every listing
+  // would be slow.
+  const explicitRoots = (): string[] => [...new Set([...configured, ...readAdded()])];
+  /** A project's folders with saved replays, each one's key learned on the way. */
+  const foldersIn = (root: string): string[] => {
+    const folders = replayFolders(root);
+    for (const folder of folders) byKey.set(idKey(folder), folder);
+    return folders;
+  };
+  /**
+   * Where saved replays are kept: the chosen project's folders, or every
+   * known project's — each folder once, under the nearest project around it.
+   */
+  const savedFolders = (project: string | null): { root: string; folder: string }[] => {
+    if (project) return foldersIn(project).map((folder) => ({ root: project, folder }));
+    const deep = new Set(explicitRoots());
+    const seen = new Set<string>();
+    const found: { root: string; folder: string }[] = [];
+    for (const root of [...knownRoots()].sort((a, b) => b.length - a.length)) {
+      for (const folder of deep.has(root) ? foldersIn(root) : [root]) {
+        if (seen.has(folder)) continue;
+        seen.add(folder);
+        found.push({ root, folder });
+      }
+    }
+    return found;
+  };
   const rootByKey = (key: string): string | undefined => {
     if (!byKey.has(key)) knownRoots();
+    if (!byKey.has(key)) for (const root of explicitRoots()) foldersIn(root);
     return byKey.get(key);
   };
   const savedId = (root: string, name: string) => `${idKey(root)}:${name}`;
@@ -395,9 +485,12 @@ export function createHandler(options: ReplayApiOptions) {
       });
     }
     const added = new Set(readAdded());
+    const deep = new Set(explicitRoots());
     return knownRoots()
       .map((root): Project => {
-        const saved = listSaved(root);
+        const saved = (deep.has(root) ? foldersIn(root) : [root])
+          .flatMap((folder) => listSaved(folder))
+          .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
         const last = [sessions.get(root)?.last, saved[0]?.startedAt]
           .filter((at): at is string => Boolean(at))
           .sort()
@@ -439,16 +532,25 @@ export function createHandler(options: ReplayApiOptions) {
     [
       "GET",
       /^\/curricula$/,
-      (): StudyCatalog => {
+      (_, query): StudyCatalog => {
         const catalog: StudyCatalog = { courses: [], problems: [] };
-        for (const root of new Set([...configured, ...readAdded()])) {
-          byKey.set(idKey(root), root);
+        // One saved replay's folder (to know the course it is a lesson of),
+        // one project's folders, or every known project's — the same folders
+        // the saved listing reads, so a course's lessons and its map agree.
+        const key = query.get("key");
+        const keyed = key ? rootByKey(key) : undefined;
+        const folders = key
+          ? keyed
+            ? [{ root: rootOf(keyed), folder: keyed }]
+            : []
+          : savedFolders(query.get("project"));
+        for (const { root, folder } of folders) {
           try {
-            const course = readStudyCourse(root);
+            const course = readStudyCourse(folder);
             if (course) catalog.courses.push(course);
           } catch (error) {
             catalog.problems.push({
-              project: projectName(root),
+              project: folderName(root, folder),
               message:
                 error instanceof Error
                   ? error.message
@@ -511,17 +613,16 @@ export function createHandler(options: ReplayApiOptions) {
     [
       "GET",
       /^\/replays$/,
-      (_, query): Page<SavedListing> => {
-        const project = query.get("project");
-        const roots = project ? [project] : knownRoots();
-        return pageOf(
-          roots
-            .flatMap((root) =>
-              listSaved(root).map(({ name, file: _file, ...saved }) => ({
+      (_, query): Page<SavedListing> =>
+        pageOf(
+          savedFolders(query.get("project"))
+            .flatMap(({ root, folder }) =>
+              listSaved(folder).map(({ name, file: _file, ...saved }) => ({
                 ...saved,
                 replayId: saved.id,
-                id: savedId(root, name),
-                repo: projectName(root),
+                id: savedId(folder, name),
+                repo: folderName(root, folder),
+                // Under the project, so choosing it lists what is nested in it.
                 project: root,
               })),
             )
@@ -529,8 +630,7 @@ export function createHandler(options: ReplayApiOptions) {
           query,
           (item) => `${item.title} ${item.repo} ${item.agent} ${item.id}`,
           (item) => item.project,
-        );
-      },
+        ),
     ],
     [
       "GET",
@@ -552,13 +652,16 @@ export function createHandler(options: ReplayApiOptions) {
       new RegExp(`^${REPLAY}\\/tree$`),
       (match): RepoTree => {
         const { root, replay } = saved(match[1]!, match[2]!);
-        return treeAt(root, replay.repo);
+        // Asked of the repository's root: from a folder nested in it, git
+        // would list only that folder, by paths relative to it.
+        return treeAt(rootOf(root), replay.repo);
       },
     ],
     [
       "GET",
       new RegExp(`^${REPLAY}\\/file$`),
-      (match, query): RepoFile => fileAt(saved(match[1]!, match[2]!).root, query),
+      (match, query): RepoFile =>
+        fileAt(rootOf(saved(match[1]!, match[2]!).root), query),
     ],
     [
       "GET",
@@ -750,6 +853,48 @@ export function createHandler(options: ReplayApiOptions) {
                 500,
                 "internal",
                 error instanceof Error ? error.message : "Export failed.",
+              ),
+        );
+      }
+      return;
+    }
+
+    // An image as itself, not in the envelope: an <img> reads it.
+    const image =
+      request.method === "GET"
+        ? (path.match(new RegExp(`^${REPLAY}\\/image$`)) ??
+          path.match(new RegExp(`^${SESSION}\\/image$`)))
+        : null;
+    if (image) {
+      try {
+        const file = repoPath(query.get("path"));
+        const type = IMAGE_TYPES[extname(file).slice(1).toLowerCase()];
+        if (!type) throw new Problem(415, "unsupported", "Not an image.");
+        const rev = query.get("rev") ?? undefined;
+        if (rev !== undefined && !/^[0-9a-f]{40}$/.test(rev))
+          throw new Problem(400, "invalid_request", "Not a commit.");
+        const root =
+          image.length === 3
+            ? rootOf(saved(image[1]!, image[2]!).root)
+            : (await liveRoot(image[1]!)).root;
+        const bytes = await imageBytes(root, file, rev);
+        response.statusCode = 200;
+        response.setHeader("Content-Type", type);
+        // An SVG opened on its own is a document: it runs nothing here.
+        response.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("Cache-Control", "no-store");
+        response.end(bytes);
+      } catch (error) {
+        problem(
+          response,
+          requestId,
+          error instanceof Problem
+            ? error
+            : new Problem(
+                500,
+                "internal",
+                error instanceof Error ? error.message : "Could not read the image.",
               ),
         );
       }

@@ -88,25 +88,25 @@ beforeAll(() => {
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
 describe("capture across a merge", () => {
-  it("leaves out what a merge brought in and the session never touched", () => {
+  it("leaves out what a merge brought in and the session never touched", async () => {
     const session = findSession(SESSION, {
       claude: home,
       codex: join(temp, "none"),
       gemini: join(temp, "none"),
     })!;
-    const { replay } = captureSession({ session, root: repo, base });
+    const { replay } = await captureSession({ session, root: repo, base });
     const paths = replay.steps.flatMap((s) => ("path" in s ? [s.path] : []));
     expect(paths).toContain("a.ts");
     expect(paths).not.toContain("theirs.ts");
   });
 
-  it("keeps a file both sides changed, even when no edit tool saw the session's part", () => {
+  it("keeps a file both sides changed, even when no edit tool saw the session's part", async () => {
     const session = findSession(SESSION, {
       claude: home,
       codex: join(temp, "none"),
       gemini: join(temp, "none"),
     })!;
-    const { replay } = captureSession({ session, root: repo, base });
+    const { replay } = await captureSession({ session, root: repo, base });
     const paths = replay.steps.flatMap((s) => ("path" in s ? [s.path] : []));
     expect(paths).toContain("shared.ts");
   });
@@ -176,13 +176,13 @@ describe("capture across a fast-forward", () => {
     );
   });
 
-  it("leaves out what a fast-forward brought in", () => {
+  it("leaves out what a fast-forward brought in", async () => {
     const session = findSession(FF_SESSION, {
       claude: home,
       codex: join(temp, "none"),
       gemini: join(temp, "none"),
     })!;
-    const { replay } = captureSession({ session, root: ff, base: ffBase });
+    const { replay } = await captureSession({ session, root: ff, base: ffBase });
     const paths = replay.steps.flatMap((s) => ("path" in s ? [s.path] : []));
     expect(paths).toContain("a.ts");
     expect(paths).not.toContain("theirs.ts");
