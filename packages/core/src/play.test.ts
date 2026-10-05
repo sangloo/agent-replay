@@ -120,4 +120,44 @@ describe("play", () => {
   it("totals the net change", () => {
     expect(playback.totals).toEqual({ added: 2, removed: 2, files: 3 });
   });
+
+  it("measures coverage from the end state's blame", () => {
+    expect(playback.coverageAt(0)).toEqual({
+      files: 1,
+      totalFiles: 2,
+      lines: 1,
+      totalLines: 3,
+    });
+    expect(playback.coverageAt(5)).toEqual({
+      files: 2,
+      totalFiles: 2,
+      lines: 3,
+      totalLines: 3,
+    });
+  });
+});
+
+describe("a long session", () => {
+  it("opens without diffing every rewrite, and diffs one when it is read", () => {
+    const body = (seed: number) =>
+      Array.from({ length: 400 }, (_, i) => `const v${(i * seed) % 997} = ${i};`).join(
+        "\n",
+      );
+    const steps: Replay["steps"] = Array.from({ length: 600 }, (_, i) => ({
+      kind: "write" as const,
+      id: `w${i}`,
+      at: "",
+      agent: "main",
+      turn: 0,
+      path: `f${i % 20}.ts`,
+      content: body(i + 2),
+    }));
+    const long: Replay = { ...replay, files: {}, steps };
+    const started = performance.now();
+    const playback = play(long);
+    expect(performance.now() - started).toBeLessThan(150);
+    const change = playback.frames[25]!.change!;
+    expect(change.hunks.length).toBeGreaterThan(0);
+    expect(change.added).toBeGreaterThan(0);
+  });
 });

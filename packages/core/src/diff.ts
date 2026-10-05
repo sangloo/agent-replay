@@ -29,21 +29,48 @@ export function splitLines(text: string): string[] {
 export type Op = "=" | "-" | "+";
 
 /**
+ * Lines as small integers, equal exactly when the lines are: the search
+ * compares numbers rather than strings, which on long lines is most of its
+ * time.
+ */
+function intern(a: readonly string[], b: readonly string[]): [Int32Array, Int32Array] {
+  const ids = new Map<string, number>();
+  const encode = (lines: readonly string[]) => {
+    const out = new Int32Array(lines.length);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      let id = ids.get(line);
+      if (id === undefined) {
+        id = ids.size;
+        ids.set(line, id);
+      }
+      out[i] = id;
+    }
+    return out;
+  };
+  return [encode(a), encode(b)];
+}
+
+/**
  * Myers' O(ND) diff over lines. Gives up (undefined) past `budget` units of
- * work — a rewritten 20,000-line file is one hunk to a reviewer anyway, and
- * the trace would otherwise cost memory proportional to D × (N + M).
+ * work — a rewritten 20,000-line file is one hunk to a reviewer anyway.
+ *
+ * Each round keeps only the diagonals it can reach (`-d…d`), so the trace
+ * the path is read back from costs D² rather than D × (N + M): most diffs a
+ * replay asks for are a few changes in a long file.
  */
 function myers(
-  a: readonly string[],
-  b: readonly string[],
+  lines: readonly string[],
+  others: readonly string[],
   budget: number,
 ): Op[] | undefined {
-  const n = a.length;
-  const m = b.length;
+  const n = lines.length;
+  const m = others.length;
   // A new or emptied file is all one kind of op: skip the search, which
   // would otherwise do its full D×(N+M) work for the most common case.
-  if (n === 0) return b.map((): Op => "+");
-  if (m === 0) return a.map((): Op => "-");
+  if (n === 0) return others.map((): Op => "+");
+  if (m === 0) return lines.map((): Op => "-");
+  const [a, b] = intern(lines, others);
   const max = n + m;
   const offset = max + 1;
   const v = new Int32Array(2 * max + 3);
@@ -51,7 +78,8 @@ function myers(
 
   for (let d = 0; d <= max; d++) {
     if (d * (max + 1) > budget) return undefined;
-    trace.push(v.slice());
+    // What round d reads: diagonals -d-1…d+1 as round d-1 left them.
+    trace.push(v.slice(offset - d - 1, offset + d + 2));
     for (let k = -d; k <= d; k += 2) {
       const down = k === -d || (k !== d && v[offset + k - 1]! < v[offset + k + 1]!);
       let x = down ? v[offset + k + 1]! : v[offset + k - 1]! + 1;
@@ -61,27 +89,24 @@ function myers(
         y++;
       }
       v[offset + k] = x;
-      if (x >= n && y >= m) return backtrack(trace, n, m, offset);
+      if (x >= n && y >= m) return backtrack(trace, n, m);
     }
   }
   return undefined;
 }
 
-function backtrack(
-  trace: readonly Int32Array[],
-  n: number,
-  m: number,
-  offset: number,
-): Op[] {
+function backtrack(trace: readonly Int32Array[], n: number, m: number): Op[] {
   const ops: Op[] = [];
   let x = n;
   let y = m;
   for (let d = trace.length - 1; d > 0; d--) {
     const v = trace[d]!;
+    // Round d's slice starts at diagonal -d-1.
+    const at = (k: number) => v[k + d + 1]!;
     const k = x - y;
-    const down = k === -d || (k !== d && v[offset + k - 1]! < v[offset + k + 1]!);
+    const down = k === -d || (k !== d && at(k - 1) < at(k + 1));
     const prevK = down ? k + 1 : k - 1;
-    const prevX = v[offset + prevK]!;
+    const prevX = at(prevK);
     const prevY = prevX - prevK;
     while (x > prevX && y > prevY) {
       ops.push("=");

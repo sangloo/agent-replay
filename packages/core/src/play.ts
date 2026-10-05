@@ -5,22 +5,56 @@
  * base commit, `steps.length` is the end of the session. Every file's
  * versions are computed once, up front, so moving the cursor anywhere —
  * scrubbing backwards included — is a lookup rather than a re-run.
+ *
+ * What costs a diff is left until someone asks: a change's hunks and line
+ * counts, the session's totals, its coverage. A long session has thousands
+ * of changes and a player shows one at a time, so opening it is the cost of
+ * applying its steps, not of diffing every version of every file.
  */
 
 import { applyStep, stepHunks } from "./apply.ts";
 import { countLines, diffHunks, diffLines, splitLines, type Hunk } from "./diff.ts";
-import { isChange, type Replay, type Step } from "./format.ts";
+import { isChange, type ChangeStep, type Replay, type Step } from "./format.ts";
 
 export interface Change {
-  path: string;
-  before: string | null;
-  after: string | null;
-  /** Where `before` becomes `after`, in `before`'s coordinates. */
-  hunks: Hunk[];
+  readonly path: string;
+  readonly before: string | null;
+  readonly after: string | null;
+  /** Where `before` becomes `after`, in `before`'s coordinates. Computed when first read. */
+  readonly hunks: Hunk[];
   /** False when the step could not be applied — the file is left as it was. */
-  applied: boolean;
-  added: number;
-  removed: number;
+  readonly applied: boolean;
+  /** Lines in and out, as git counts them. Computed when first read. */
+  readonly added: number;
+  readonly removed: number;
+}
+
+/** A change whose hunks and counts are worked out the first time they are read. */
+function lazyChange(
+  step: ChangeStep,
+  before: string | null,
+  after: string | null,
+  applied: boolean,
+): Change {
+  let hunks: Hunk[] | undefined;
+  let counts: { added: number; removed: number } | undefined;
+  const hunksOf = () => (hunks ??= applied ? stepHunks(before, step) : []);
+  const countsOf = () => (counts ??= countLines(hunksOf(), before ?? ""));
+  return {
+    path: step.path,
+    before,
+    after,
+    applied,
+    get hunks() {
+      return hunksOf();
+    },
+    get added() {
+      return countsOf().added;
+    },
+    get removed() {
+      return countsOf().removed;
+    },
+  };
 }
 
 export interface Frame {
@@ -69,7 +103,8 @@ export interface Playback {
    * of those files — the "how far along" of a history replay.
    */
   coverageAt(cursor: number): Coverage;
-  totals: { added: number; removed: number; files: number };
+  /** The net change from base to end. Computed when first read. */
+  readonly totals: { added: number; removed: number; files: number };
 }
 
 interface Version {
@@ -91,23 +126,11 @@ export function play(replay: Replay): Playback {
     const next = applyStep(before, step);
     const applied = next !== undefined;
     const after = applied ? next : before;
-    const hunks = applied ? stepHunks(before, step) : [];
     current.set(step.path, after);
     const list = versions.get(step.path) ?? [{ cursor: 0, content: null }];
     list.push({ cursor: index + 1, content: after });
     versions.set(step.path, list);
-    return {
-      index,
-      step,
-      change: {
-        path: step.path,
-        before,
-        after,
-        hunks,
-        applied,
-        ...countLines(hunks, before ?? ""),
-      },
-    };
+    return { index, step, change: lazyChange(step, before, after, applied) };
   });
 
   const contentAt = (path: string, cursor: number): string | null => {
@@ -196,43 +219,67 @@ export function play(replay: Replay): Playback {
     return known[upto]!;
   };
 
-  const endLines = new Map<string, number>();
-  for (const path of paths) {
-    if (asides.has(path)) continue;
-    const end = contentAt(path, frames.length);
-    if (end !== null) endLines.set(path, splitLines(end).length);
-  }
-  const totalLines = [...endLines.values()].reduce((sum, n) => sum + n, 0);
+  // Coverage needs every file's blame at the end: worked out once, on the
+  // first question, then each answer is a count of the lines written before
+  // the cursor — a binary search.
+  let ready: { totalFiles: number; totalLines: number; steps: Int32Array } | undefined;
   const coverageAt = (cursor: number): Coverage => {
-    let files = 0;
-    let lines = 0;
-    for (const path of endLines.keys()) {
-      if (contentAt(path, cursor) === null) continue;
-      files++;
-      // A line counts once it holds its end-state text — once the step that
-      // last wrote it, by the end's blame, has been applied.
-      lines += blameAt(path, frames.length).filter((step) => step < cursor).length;
+    if (!ready) {
+      const ends = paths.filter(
+        (path) => !asides.has(path) && contentAt(path, frames.length) !== null,
+      );
+      const steps = ends.flatMap((path) => blameAt(path, frames.length));
+      ready = {
+        totalFiles: ends.length,
+        totalLines: steps.length,
+        steps: Int32Array.from(steps).sort(),
+      };
     }
-    return { files, totalFiles: endLines.size, lines, totalLines };
+    let files = 0;
+    for (const path of paths) {
+      if (asides.has(path) || contentAt(path, frames.length) === null) continue;
+      if (contentAt(path, cursor) !== null) files++;
+    }
+    // A line counts once it holds its end-state text — once the step that
+    // last wrote it, by the end's blame, has been applied.
+    let lo = 0;
+    let hi = ready.steps.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ready.steps[mid]! < cursor) lo = mid + 1;
+      else hi = mid;
+    }
+    return {
+      files,
+      totalFiles: ready.totalFiles,
+      lines: lo,
+      totalLines: ready.totalLines,
+    };
   };
 
-  let added = 0;
-  let removed = 0;
-  for (const path of paths) {
-    if (asides.has(path)) continue;
-    const base = contentAt(path, 0);
-    const end = contentAt(path, frames.length);
-    if (base === end) continue;
-    const net = countLines(diffHunks(base ?? "", end ?? ""), base ?? "");
-    added += net.added;
-    removed += net.removed;
-  }
-  const changedFiles = paths.filter(
-    (path) =>
-      !asides.has(path) &&
-      (contentAt(path, 0) !== contentAt(path, frames.length) ||
-        (omitted.has(path) && versions.get(path)!.length > 1)),
-  ).length;
+  let totals: Playback["totals"] | undefined;
+  const totalsOf = (): Playback["totals"] => {
+    if (totals) return totals;
+    let added = 0;
+    let removed = 0;
+    for (const path of paths) {
+      if (asides.has(path)) continue;
+      const base = contentAt(path, 0);
+      const end = contentAt(path, frames.length);
+      if (base === end) continue;
+      const net = countLines(diffHunks(base ?? "", end ?? ""), base ?? "");
+      added += net.added;
+      removed += net.removed;
+    }
+    const files = paths.filter(
+      (path) =>
+        !asides.has(path) &&
+        (contentAt(path, 0) !== contentAt(path, frames.length) ||
+          (omitted.has(path) && versions.get(path)!.length > 1)),
+    ).length;
+    totals = { added, removed, files };
+    return totals;
+  };
 
   return {
     replay,
@@ -243,6 +290,8 @@ export function play(replay: Replay): Playback {
     focusAt,
     blameAt,
     coverageAt,
-    totals: { added, removed, files: changedFiles },
+    get totals() {
+      return totalsOf();
+    },
   };
 }
