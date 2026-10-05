@@ -229,3 +229,34 @@ it("keeps standalone course links relative and offers a return to its companion 
     "lesson-02.html",
   );
 });
+
+it("reveals large lesson lists in batches and searches beyond the first batch", () => {
+  const many: Curriculum = {
+    ...curriculum,
+    chapters: [
+      {
+        ...curriculum.chapters[0]!,
+        lessons: Array.from({ length: 100 }, (_, i) => ({
+          id: String(i + 1),
+          title: `Topic ${i + 1}`,
+          goal: `Goal ${i + 1}`,
+          replay: `lesson-${i + 1}`,
+          prerequisites: [],
+        })),
+      },
+    ],
+  };
+  const { container } = render(
+    <ThemeProvider>
+      <CourseMap course={{ curriculum: many, key: "12345678", unavailable: [] }} />
+    </ThemeProvider>,
+  );
+  expect(container.querySelectorAll(".study-lessons > li")).toHaveLength(24);
+  fireEvent.click(screen.getByRole("button", { name: /Show more lessons/ }));
+  expect(container.querySelectorAll(".study-lessons > li")).toHaveLength(48);
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Topic 100" } });
+  expect(container.querySelectorAll(".study-lessons > li")).toHaveLength(1);
+  expect(screen.getByRole("link", { name: "Topic 100" })).toBeVisible();
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
+  expect(container.querySelectorAll(".study-lessons > li")).toHaveLength(48);
+});

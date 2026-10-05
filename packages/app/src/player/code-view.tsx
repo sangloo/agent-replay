@@ -302,11 +302,14 @@ export function CodeView({
     [hover, origins, blameOf],
   );
 
-  const first = Math.max(0, Math.floor((view.top - PAD) / row) - OVERSCAN);
-  const last = Math.min(
-    lines.length,
-    Math.ceil((view.top + view.height) / row) + OVERSCAN,
+  // Clamped to the text: a file that shrank under a deep scroll still shows
+  // its end, not an empty window past it.
+  const rows = Math.ceil(view.height / row);
+  const first = Math.min(
+    Math.max(0, lines.length - rows - OVERSCAN),
+    Math.max(0, Math.floor((view.top - PAD) / row) - OVERSCAN),
   );
+  const last = Math.min(lines.length, first + rows + 2 * OVERSCAN);
   // The widest line sets the scroll width, so it does not change as rows
   // come and go.
   const widest = React.useMemo(

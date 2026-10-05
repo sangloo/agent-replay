@@ -6,6 +6,7 @@ import {
   evidenceOf,
   isChange,
   play,
+  preparePlayback,
   sourceReferenceIndex,
   type Playback,
   type SourceDestination,
@@ -71,6 +72,7 @@ import {
   type ProgressStore,
   type Speed,
 } from "./use-playback";
+import { PlayerSkeleton } from "./skeleton";
 import { useRepo } from "./use-repo";
 
 function percent(part: number, whole: number): string {
@@ -225,7 +227,7 @@ export interface PlayerProps {
   notice?: React.ReactNode;
 }
 
-export function Player({
+function ReadyPlayer({
   replay,
   study,
   source,
@@ -238,8 +240,9 @@ export function Player({
   onBack,
   backLabel,
   notice,
-}: PlayerProps) {
-  const playback = React.useMemo(() => play(replay), [replay]);
+  prepared,
+}: PlayerProps & { prepared?: Playback }) {
+  const playback = React.useMemo(() => prepared ?? play(replay), [replay, prepared]);
   // A course teaches: its lessons lead, and there is nothing to audit.
   const isCourse = replay.source === "course";
   const [storedFilter, setFilter] = usePersistent<Filter>(
@@ -1338,4 +1341,70 @@ function StepCount({
 
 function Message({ children }: { children: React.ReactNode }) {
   return <p className="max-w-prose p-6 text-sm text-text-mid">{children}</p>;
+}
+
+/**
+ * Preparing a replay applies every step once; diffs wait until a change is
+ * shown. That is a few milliseconds for an ordinary session, so it happens
+ * at once; a very long history is prepared in slices that yield to the
+ * browser, with the player's shape and a count on screen meanwhile.
+ */
+export function Player(props: PlayerProps) {
+  const { replay } = props;
+  const large =
+    replay.steps.length > 4000 ||
+    replay.steps.reduce(
+      (sum, step) =>
+        sum +
+        ("content" in step && typeof step.content === "string"
+          ? step.content.length
+          : 0),
+      0,
+    ) > 8_000_000 ||
+    Object.values(replay.files).reduce((sum, text) => sum + (text?.length ?? 0), 0) >
+      8_000_000;
+  return large ? (
+    <PreparingPlayer key={replay.endedAt} {...props} />
+  ) : (
+    <ReadyPlayer {...props} />
+  );
+}
+
+function PreparingPlayer(props: PlayerProps) {
+  const [prepared, setPrepared] = React.useState<Playback>();
+  const [count, setCount] = React.useState(0);
+  const [error, setError] = React.useState<string>();
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void preparePlayback(props.replay, setCount, controller.signal).then(
+        (result) => {
+          if (!controller.signal.aborted) setPrepared(result);
+        },
+        (reason: unknown) => {
+          if (!controller.signal.aborted)
+            setError(
+              reason instanceof Error
+                ? reason.message
+                : "Could not prepare this session.",
+            );
+        },
+      );
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [props.replay]);
+  if (prepared) return <ReadyPlayer {...props} prepared={prepared} />;
+  return (
+    <PlayerSkeleton
+      title={props.replay.title}
+      what={
+        error ?? `Preparing the player — ${count} of ${props.replay.steps.length} steps`
+      }
+      backLabel={props.backLabel}
+      onBack={props.onBack}
+    />
+  );
 }

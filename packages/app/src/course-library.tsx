@@ -33,6 +33,8 @@ import {
 import { ThemeToggle } from "./theme-toggle";
 
 const loadCourses = () => api.replays("agent=course&limit=100");
+/** Lessons a course map mounts at a time. */
+const BATCH = 24;
 
 /**
  * Learn: every course on this machine and how far along each one is — the
@@ -103,7 +105,7 @@ function resumeOf(maps: readonly StudyCourse[], courses: readonly SavedListing[]
         context: map.curriculum.title,
         href,
         progress: saved,
-        fraction: fractionOf(saved, map.steps?.[lesson.id]),
+        fraction: fractionOf(saved),
       });
     }
   }
@@ -356,13 +358,41 @@ export function CourseMap({
     terms.every((t) =>
       `${l.id} ${l.title} ${l.goal} ${chapterTitle}`.toLowerCase().includes(t),
     );
-  const chapters = curriculum.chapters
-    .map((chapter, number) => ({
-      chapter,
-      number,
-      lessons: chapter.lessons.filter((l) => matches(l, chapter.title)),
-    }))
-    .filter((c) => c.lessons.length > 0);
+  const matched = curriculum.chapters.map((chapter, number) => ({
+    chapter,
+    number,
+    lessons: chapter.lessons.filter((l) => matches(l, chapter.title)),
+  }));
+  // A map of hundreds of lessons mounts a batch at a time: more arrive as
+  // the end of the list comes into view, or from the button there. Search
+  // still covers every lesson.
+  const [page, setPage] = React.useState({ query, count: BATCH });
+  const count = page.query === query ? page.count : BATCH;
+  const total = matched.reduce((sum, c) => sum + c.lessons.length, 0);
+  const chapters: typeof matched = [];
+  for (let left = count, i = 0; i < matched.length && left > 0; i++) {
+    const lessons = matched[i]!.lessons.slice(0, left);
+    left -= lessons.length;
+    if (lessons.length) chapters.push({ ...matched[i]!, lessons });
+  }
+  const more = total > count;
+  const loadMore = React.useCallback(
+    () => setPage({ query, count: count + BATCH }),
+    [query, count],
+  );
+  const sentinel = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    if (!more || !sentinel.current || typeof IntersectionObserver === "undefined")
+      return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) loadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(sentinel.current);
+    return () => observer.disconnect();
+  }, [more, loadMore]);
   const link = (lesson: CurriculumLesson) => {
     const href = studyHref(
       {
@@ -384,9 +414,8 @@ export function CourseMap({
   const done = all.filter((l) => progress[l.id]?.reviewed).length;
   const percentOf = (lesson: CurriculumLesson) => {
     const saved = progress[lesson.id];
-    const steps = course.steps?.[lesson.id];
-    return saved && steps
-      ? Math.round((Math.min(furthestOf(saved), steps) / steps) * 100)
+    return saved?.total
+      ? Math.round((Math.min(furthestOf(saved), saved.total) / saved.total) * 100)
       : undefined;
   };
 
@@ -467,7 +496,7 @@ export function CourseMap({
           className="pl-8"
         />
       </div>
-      {!chapters.length && (
+      {!total && (
         <p role="status" className="text-sm text-text-low">
           No lessons match “{query}”.
         </p>
@@ -484,7 +513,7 @@ export function CourseMap({
             <h2 className="text-lg font-semibold tracking-tight">{chapter.title}</h2>
             <p className="max-w-prose text-sm text-text-mid">{chapter.description}</p>
           </div>
-          <ol className="flex flex-col border-t border-line">
+          <ol className="study-lessons flex flex-col border-t border-line">
             {lessons.map((l) => {
               const href = link(l);
               const status = statusOf(l);
@@ -563,6 +592,16 @@ export function CourseMap({
           </ol>
         </section>
       ))}
+      {more && (
+        <button
+          ref={sentinel}
+          type="button"
+          onClick={loadMore}
+          className="self-center rounded-control px-4 py-2 text-sm text-text-mid focus-bar hover:bg-hover hover:text-text-high"
+        >
+          Show more lessons ({count} of {total})
+        </button>
+      )}
     </main>
   );
 }

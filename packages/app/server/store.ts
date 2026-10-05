@@ -165,3 +165,14 @@ export function listSaved(root: string): SavedReplay[] {
     .filter((saved): saved is SavedReplay => saved !== undefined)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
+
+/** Cheap change detection; never parses or transfers the replay body. */
+export function replayStamp(root: string, name: string): string | undefined {
+  if (!/^[\w.-]+$/.test(name)) return undefined;
+  try {
+    const stat = statSync(join(root, REPLAY_DIR, `${name}.json`));
+    return `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
+  } catch {
+    return undefined;
+  }
+}

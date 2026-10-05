@@ -1,5 +1,5 @@
 import type { Frame, NoteLevel, Replay, Step } from "@agent-replay/core";
-import { cn } from "@/ui";
+import { cn, Tree } from "@/ui";
 import {
   BookOpen,
   ChevronRight,
@@ -321,44 +321,43 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
  * so even a session of thousands of steps reads as its few dozen prompts.
  * What is done reads full, what is ahead quiet; click anything to go there.
  */
-export const StepList = React.memo(function StepList({
+/** The visible steps under the prompt (or, in a course, the lesson) they answer. */
+function groupsOf(frames: readonly Frame[], visible: readonly number[]): Group[] {
+  const out: Group[] = [];
+  const shown = new Set(visible);
+  let group: Group = { rows: [], files: 0 };
+  const close = () => {
+    if (!group.prompt && !group.rows.length) return;
+    group.files = new Set(
+      group.rows.flatMap((f) => (f.change ? [f.change.path] : [])),
+    ).size;
+    out.push(group);
+  };
+  for (const frame of frames) {
+    if (
+      (frame.step.kind === "prompt" && frame.step.agent === "main") ||
+      frame.step.kind === "lesson"
+    ) {
+      close();
+      group = { prompt: frame, rows: [], files: 0 };
+      continue;
+    }
+    if (shown.has(frame.index)) group.rows.push(frame);
+  }
+  close();
+  return out;
+}
+
+const GroupedStepList = React.memo(function GroupedStepList({
   replay,
-  frames,
   visible,
   cursor,
   onJump,
   filter,
   onFilter,
   notes = 0,
-}: StepListProps) {
-  // Group the visible steps under the prompt they answer.
-  const groups = React.useMemo(() => {
-    const out: Group[] = [];
-    const shown = new Set(visible);
-    let group: Group = { rows: [], files: 0 };
-    const close = () => {
-      if (!group.prompt && !group.rows.length) return;
-      group.files = new Set(
-        group.rows.flatMap((f) => (f.change ? [f.change.path] : [])),
-      ).size;
-      out.push(group);
-    };
-    for (const frame of frames) {
-      // A prompt heads what answered it; in a course, a lesson heads its steps.
-      if (
-        (frame.step.kind === "prompt" && frame.step.agent === "main") ||
-        frame.step.kind === "lesson"
-      ) {
-        close();
-        group = { prompt: frame, rows: [], files: 0 };
-        continue;
-      }
-      if (shown.has(frame.index)) group.rows.push(frame);
-    }
-    close();
-    return out;
-  }, [frames, visible]);
-
+  groups,
+}: StepListProps & { groups: readonly Group[] }) {
   // The step on screen — or, when the filter hides it, the last shown before it.
   const current = React.useMemo(
     () => visible.filter((index) => index < cursor).at(-1) ?? -1,
@@ -406,39 +405,7 @@ export const StepList = React.memo(function StepList({
   return (
     <div className="flex flex-col pb-6">
       {filter && onFilter ? (
-        <div className="sticky top-0 z-raised flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-low px-2">
-          <Choice<Filter>
-            label="Steps shown"
-            value={filter}
-            onChange={onFilter}
-            options={[
-              {
-                value: "changes",
-                label: "Changes",
-                hint: "File changes, under the prompts they answer",
-              },
-              {
-                value: "all",
-                label: "Everything",
-                hint: "Every step: commands, replies, changes",
-              },
-              ...(notes
-                ? [
-                    {
-                      value: "notes" as const,
-                      label: (
-                        <>
-                          Notes{" "}
-                          <span className="font-normal tabular-nums">{notes}</span>
-                        </>
-                      ),
-                      hint: "Only the steps with a reviewer's note",
-                    },
-                  ]
-                : []),
-            ]}
-          />
-        </div>
+        <FilterBar filter={filter} onFilter={onFilter} notes={notes} sticky />
       ) : null}
       <button
         type="button"
@@ -460,7 +427,8 @@ export const StepList = React.memo(function StepList({
         const isLesson = group.prompt?.step.kind === "lesson";
         if (isLesson) lessons++;
         const here = g === currentGroup;
-        const open = here || opened.has(g);
+        // Steps before the first prompt have no header to open them by.
+        const open = here || opened.has(g) || !group.prompt;
         const reached = (group.prompt?.index ?? group.rows[0]?.index ?? 0) < cursor;
         let rows = group.rows;
         let hiddenBefore = 0;
@@ -595,6 +563,59 @@ export const StepList = React.memo(function StepList({
   );
 });
 
+/** What the list and the timeline show: changes, everything, or the noted steps. */
+function FilterBar({
+  filter,
+  onFilter,
+  notes,
+  sticky,
+}: {
+  filter: Filter;
+  onFilter: (filter: Filter) => void;
+  notes: number;
+  sticky?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-low px-2",
+        sticky && "sticky top-0 z-raised",
+      )}
+    >
+      <Choice<Filter>
+        label="Steps shown"
+        value={filter}
+        onChange={onFilter}
+        options={[
+          {
+            value: "changes",
+            label: "Changes",
+            hint: "File changes, under the prompts they answer",
+          },
+          {
+            value: "all",
+            label: "Everything",
+            hint: "Every step: commands, replies, changes",
+          },
+          ...(notes
+            ? [
+                {
+                  value: "notes" as const,
+                  label: (
+                    <>
+                      Notes <span className="font-normal tabular-nums">{notes}</span>
+                    </>
+                  ),
+                  hint: "Only the steps with a reviewer's note",
+                },
+              ]
+            : []),
+        ]}
+      />
+    </div>
+  );
+}
+
 function More({
   children,
   onClick,
@@ -610,5 +631,84 @@ function More({
     >
       Show {children}
     </button>
+  );
+}
+
+/**
+ * The list by turns, while that stays small: a few hundred turns at most.
+ * A history with no turns to fold into (git commits, a log of thousands of
+ * replies) or with more turns than that is one windowed list instead, the
+ * same keyboard-accessible kind as the file tree.
+ */
+export const StepList = React.memo(function StepList(props: StepListProps) {
+  const groups = React.useMemo(
+    () => groupsOf(props.frames, props.visible),
+    [props.frames, props.visible],
+  );
+  const flat =
+    props.visible.length > 300 &&
+    (groups.length > 200 || groups.every((group) => !group.prompt));
+  return flat ? (
+    <VirtualSteps {...props} />
+  ) : (
+    <GroupedStepList {...props} groups={groups} />
+  );
+});
+
+function VirtualSteps({
+  replay,
+  frames,
+  visible,
+  cursor,
+  onJump,
+  filter,
+  onFilter,
+  notes = 0,
+}: StepListProps) {
+  const lines = React.useMemo(
+    () =>
+      visible.map((index) => ({
+        id: String(index),
+        parentId: null,
+        label: `${index + 1}. ${rowLabel(frames[index]!)}`,
+      })),
+    [visible, frames],
+  );
+  const index = cursor - 1;
+  const current = frames[index];
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {filter && onFilter ? (
+        <FilterBar filter={filter} onFilter={onFilter} notes={notes} />
+      ) : null}
+      <button
+        type="button"
+        className={cn(
+          "flex h-8 shrink-0 items-center gap-2.5 px-4 text-left text-xs focus-bar",
+          cursor === 0 ? "bg-active text-text-high" : "text-text-low hover:bg-hover",
+        )}
+        onClick={() => onJump(0)}
+      >
+        <GitCommitHorizontal aria-hidden className="icon-sm shrink-0" />
+        {replay.source === "course" ? "Empty repository" : "Base commit"}
+      </button>
+      <Tree
+        lines={lines}
+        expanded="all"
+        onToggle={() => {}}
+        selected={String(index)}
+        onSelect={(id) => onJump(Number(id) + 1)}
+        reveal={{ id: String(index), token: cursor }}
+        label="Session steps"
+        rowHeight={32}
+        className="min-h-0 flex-1"
+        icon={(row) => <StepIcon frame={frames[Number(row.id)]!} className="icon-sm" />}
+      />
+      {current && (
+        <div className="max-h-[40%] shrink-0 overflow-auto border-t border-line p-3">
+          <Detail frame={current} replay={replay} onJump={onJump} />
+        </div>
+      )}
+    </div>
   );
 }

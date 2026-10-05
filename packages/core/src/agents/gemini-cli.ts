@@ -99,7 +99,13 @@ function toActions(call: Json): Action[] {
 
 /** The records of either format, in order. */
 function records(log: Log): Json[] {
-  const text = typeof log === "string" ? log : (log[0] ?? "");
+  let text = typeof log === "string" ? log : "";
+  if (typeof log !== "string") {
+    for (const line of log) {
+      text = line;
+      break;
+    }
+  }
   const trimmed = text.trimStart();
   if (trimmed.startsWith("{") && !trimmed.slice(0, 4096).includes("\n{")) {
     try {

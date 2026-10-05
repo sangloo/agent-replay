@@ -161,3 +161,20 @@ describe("a long session", () => {
     expect(change.added).toBeGreaterThan(0);
   });
 });
+
+it("prepares asynchronously with identical history and cancels abandoned work", async () => {
+  const { preparePlayback } = await import("./play.ts");
+  const controller = new AbortController();
+  const asyncPlayback = await preparePlayback(replay, () => {}, controller.signal);
+  const syncPlayback = play(replay);
+  expect(asyncPlayback.frames).toEqual(syncPlayback.frames);
+  expect(asyncPlayback.totals).toEqual(syncPlayback.totals);
+  for (let cursor = 0; cursor <= replay.steps.length; cursor++) {
+    expect(asyncPlayback.filesAt(cursor)).toEqual(syncPlayback.filesAt(cursor));
+    expect(asyncPlayback.contentAt("a.ts", cursor)).toEqual(
+      syncPlayback.contentAt("a.ts", cursor),
+    );
+  }
+  controller.abort();
+  await expect(preparePlayback(replay, () => {}, controller.signal)).rejects.toThrow();
+});

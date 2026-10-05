@@ -114,33 +114,14 @@ async function call<T>(
 const sourcePath = ({ kind, id }: ReplaySource) =>
   `/api/${kind}/${encodeURIComponent(id)}`;
 
-/**
- * A live session is read in full when it is opened — the slow part of
- * opening one. The library starts that read when a row is hovered or
- * focused, so by the click it is often done; the player then takes the
- * answer already on its way rather than asking again.
- */
-const early = new Map<string, { at: number; answer: Promise<ApiResult<LiveReplay>> }>();
-const EARLY_FOR = 60_000;
-
-function session(id: string): Promise<ApiResult<LiveReplay>> {
-  const started = early.get(id);
-  early.delete(id);
-  if (started && Date.now() - started.at < EARLY_FOR) return started.answer;
-  return call<LiveReplay>(
-    "GET",
-    `/api/sessions/${encodeURIComponent(id)}`,
-    undefined,
-    "slow",
-  );
-}
-
 /** Titles the lists have shown, so a replay that is still loading can be named. */
 const titles = new Map<string, string>();
 export const rememberTitle = (id: string, title: string) => titles.set(id, title);
 export const knownTitle = (id: string) => titles.get(id);
 
 export const api = {
+  replayStamp: (id: string) =>
+    call<{ stamp: string }>("GET", `/api/replays/${encodeURIComponent(id)}/stamp`),
   curricula: () => call<StudyCatalog>("GET", "/api/curricula"),
   projects: () => call<Project[]>("GET", "/api/projects"),
   addProject: (path: string) => call<Project>("POST", "/api/projects", { path }),
@@ -167,26 +148,13 @@ export const api = {
       "GET",
       `${sourcePath(source)}/file?${new URLSearchParams({ rev, path })}`,
     ),
-  session,
-  /** Start reading a session now, for a click that is probably coming. */
-  prefetchSession: (id: string) => {
-    if (early.has(id)) return;
-    // An answer nobody opened is let go: it can hold a whole session.
-    for (const [key, { at }] of early)
-      if (Date.now() - at >= EARLY_FOR) early.delete(key);
-    // One at a time: the service reads a session in one go, and a pointer
-    // sweeping down the list should not queue a dozen.
-    for (const { at } of early.values()) if (Date.now() - at < 5_000) return;
-    early.set(id, {
-      at: Date.now(),
-      answer: call<LiveReplay>(
-        "GET",
-        `/api/sessions/${encodeURIComponent(id)}`,
-        undefined,
-        "slow",
-      ),
-    });
-  },
+  session: (id: string) =>
+    call<LiveReplay>(
+      "GET",
+      `/api/sessions/${encodeURIComponent(id)}`,
+      undefined,
+      "slow",
+    ),
   save: (id: string) =>
     call<{ id?: string; file: string }>(
       "POST",
@@ -230,4 +198,146 @@ export function useLoad<T>(
     };
   }, [key, load]);
   return settled?.key === key ? settled.loaded : { state: "loading" };
+}
+
+export interface SessionProgress {
+  message: string;
+  title?: string;
+  preview?: string;
+  loaded?: number;
+  total?: number;
+}
+
+/** NDJSON avoids a single enormous JSON.parse and exposes capture/transfer progress. */
+export async function streamSession(
+  id: string,
+  onProgress: (progress: SessionProgress) => void,
+  signal: AbortSignal,
+): Promise<ApiResult<LiveReplay>> {
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/stream`, {
+      signal,
+      headers: { Accept: "application/x-ndjson" },
+    });
+    if (!response.ok || !response.body)
+      throw new Error(
+        response.status === 503
+          ? "Two sessions are already loading. Retry shortly."
+          : `Could not load session (${response.status}).`,
+      );
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "",
+      loaded = 0,
+      total = 0,
+      fileTotal = 0,
+      fileCount = 0;
+    let data: LiveReplay | undefined;
+    let preview: string | undefined;
+    let done = false;
+    let lastPaint = performance.now();
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+        let newline: number;
+        while ((newline = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          if (!line) continue;
+          const event = JSON.parse(line);
+          if (event.kind === "error") throw new Error(event.message);
+          if (event.kind === "progress") onProgress(event);
+          else if (event.kind === "header") {
+            total = event.total;
+            fileTotal = event.fileTotal;
+            data = {
+              replay: { ...event.replay, files: {}, steps: [] },
+              repo: event.repo,
+              warnings: event.warnings,
+              saved: event.saved,
+            };
+          } else if (event.kind === "files" && data) {
+            for (const [path, content] of event.items) {
+              Object.defineProperty(data.replay.files, path, {
+                value: content,
+                enumerable: true,
+                writable: true,
+                configurable: true,
+              });
+              fileCount++;
+            }
+          } else if (event.kind === "steps" && data) {
+            for (const step of event.items) {
+              data.replay.steps.push(step);
+              loaded++;
+              if (!preview && (step.kind === "prompt" || step.kind === "say"))
+                preview = step.text.slice(0, 1500);
+            }
+          } else if (event.kind === "done") done = true;
+          if (data && (performance.now() - lastPaint > 16 || done)) {
+            onProgress({
+              title: data.replay.title,
+              preview,
+              loaded,
+              total,
+              message:
+                fileCount < fileTotal
+                  ? `Loading source files (${fileCount} of ${fileTotal})`
+                  : "Loading session steps",
+            });
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            signal.throwIfAborted();
+            lastPaint = performance.now();
+          }
+        }
+        if (chunk.done) break;
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    if (!done || !data || loaded !== total || fileCount !== fileTotal)
+      throw new Error(
+        "The session stream ended early. Retry to load the complete session.",
+      );
+    return { ok: true, data };
+  } catch (error) {
+    return {
+      ok: false,
+      failure: {
+        message: error instanceof Error ? error.message : "Could not load session.",
+      },
+    };
+  }
+}
+
+export function useSession(id: string) {
+  const [loaded, setLoaded] = React.useState<Loaded<LiveReplay>>({ state: "loading" });
+  const [progress, setProgress] = React.useState<SessionProgress>({
+    message: "Locating session",
+  });
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void streamSession(
+      id,
+      (next) => {
+        if (!controller.signal.aborted) setProgress(next);
+      },
+      controller.signal,
+    ).then((result) => {
+      if (controller.signal.aborted) return;
+      setLoaded(
+        result.ok
+          ? { state: "ready", data: result.data }
+          : {
+              state: "failed",
+              failure: result.failure,
+              message: result.failure.message,
+            },
+      );
+    });
+    return () => controller.abort();
+  }, [id]);
+  return { loaded, progress };
 }

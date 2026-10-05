@@ -286,7 +286,7 @@ export function currentSessionId(): string | undefined {
 
 /** The main log first, then any subagents' found beside it. */
 export function loadTranscripts(session: SessionSummary): Transcript[] {
-  const main = parseTranscript(readLog(session.file));
+  const main = parseTranscript(streamLog(session.file));
   const dirs =
     session.agent === "gemini-cli"
       ? [join(dirname(session.file), session.id)]
@@ -296,9 +296,60 @@ export function loadTranscripts(session: SessionSummary): Transcript[] {
       .filter((name) => name.endsWith(".jsonl"))
       .sort()
       .map((name) =>
-        parseTranscript(readLog(join(dir, name)), basename(name, ".jsonl")),
+        parseTranscript(streamLog(join(dir, name)), basename(name, ".jsonl")),
       ),
   );
   if (!main.cwd && session.cwd) main.cwd = session.cwd;
   return [main, ...subagents];
+}
+
+/** Re-iterable bounded reader: format detection and parsing each open their own fd. */
+export function streamLog(file: string): Iterable<string> {
+  if (file.endsWith(".zst") || file.endsWith(".json")) return readLog(file);
+  return {
+    *[Symbol.iterator]() {
+      const fd = openSync(file, "r");
+      const block = Buffer.allocUnsafe(1024 * 1024);
+      let parts: Buffer[] = [],
+        size = 0,
+        oversized = false;
+      const line = () => {
+        if (oversized || size === 0) return undefined;
+        let text = Buffer.concat(parts, size).toString("utf8");
+        if (size > BULKY_LINE)
+          text = text.replace(IMAGE_DATA, "$1$2").replace(IMAGE_DATA_FIRST, "$1$2");
+        return text;
+      };
+      try {
+        for (;;) {
+          const bytes = readSync(fd, block, 0, block.length, null);
+          if (!bytes) {
+            const text = line();
+            if (text !== undefined) yield text;
+            break;
+          }
+          let start = 0;
+          while (start < bytes) {
+            const found = block.indexOf(0x0a, start);
+            const end = found < 0 || found >= bytes ? bytes : found;
+            size += end - start;
+            if (size > MAX_LINE) {
+              oversized = true;
+              parts = [];
+            } else if (!oversized) parts.push(Buffer.from(block.subarray(start, end)));
+            if (end < bytes) {
+              const text = line();
+              if (text !== undefined) yield text;
+              parts = [];
+              size = 0;
+              oversized = false;
+            }
+            start = end + 1;
+          }
+        }
+      } finally {
+        closeSync(fd);
+      }
+    },
+  };
 }

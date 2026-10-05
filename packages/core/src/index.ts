@@ -91,6 +91,7 @@ export {
 export { annotate, readNotes, type Annotated } from "./notes.ts";
 export {
   play,
+  preparePlayback,
   type Change,
   type Coverage,
   type FileEntry,

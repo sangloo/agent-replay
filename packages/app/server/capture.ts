@@ -25,6 +25,7 @@ import { findSaved, readReplay } from "./store.ts";
 
 export interface CaptureRequest {
   session: SessionSummary;
+  onProgress?: (message: string) => void;
   /** The repository; guessed from the session when omitted. */
   root?: string;
   /** Override the base commit. */
@@ -147,7 +148,9 @@ export function captureSession(
   request: CaptureRequest,
   candidates: readonly string[] = [],
 ): Captured {
+  request.onProgress?.("Reading transcript");
   const transcripts = loadTranscripts(request.session);
+  request.onProgress?.("Resolving repository history");
   const main = transcripts[0] ?? parseTranscript("");
   const root = request.root
     ? (git.repoRoot(request.root) ?? request.root)
@@ -158,6 +161,14 @@ export function captureSession(
     );
   }
   const warnings: string[] = [];
+  const unsupported = transcripts.reduce(
+    (sum, transcript) => sum + (transcript.unsupportedTools ?? 0),
+    0,
+  );
+  if (unsupported)
+    warnings.push(
+      `${unsupported} tool calls use a format this recorder does not yet interpret. Their individual edits are unavailable; external changes show repository reconciliation, not proven attribution to those calls.`,
+    );
   const isRepo = git.repoRoot(root) !== undefined;
   // A repository with no commits yet still has a working tree to compare.
   const hasCommits = isRepo && git.head(root) !== undefined;
@@ -172,6 +183,7 @@ export function captureSession(
   if (request.base && !base) warnings.push(`Unknown base ${request.base}.`);
   if (request.end && !end) warnings.push(`Unknown end ${request.end}.`);
 
+  request.onProgress?.("Finding saved annotations");
   const saved = findSaved(root, main.sessionId ?? request.session.id);
   const previous = saved ? readReplay(root, saved) : undefined;
   const head = end ?? git.head(root);
@@ -186,6 +198,7 @@ export function captureSession(
   const touched = touchedPaths(transcripts, [root, ...aliases]);
   // Files a merge brought in (main merged into the branch mid-session) are
   // not the session's work unless the session touched them too.
+  request.onProgress?.("Identifying repository changes");
   const merged =
     base && head ? git.mergedIn(root, base, head, !end) : new Set<string>();
   const mine = new Set(touched);
@@ -195,14 +208,11 @@ export function captureSession(
   const paths = [...new Set([...touched, ...changed])];
   // One git process for every base file, not two per file: the hook runs
   // this after every turn.
-  const bases = base
-    ? git.readBlobs(
-        root,
-        paths.map((path) => `${base}:${path}`),
-      )
-    : new Map();
+  request.onProgress?.(`Reading ${paths.length} source snapshots`);
+  const bases = base ? git.readFilesAt(root, base, paths) : new Map();
   const secret = isRepo ? git.ignored(root, paths) : new Set<string>();
 
+  request.onProgress?.("Reconstructing session changes");
   const replay = capture(transcripts, {
     root,
     aliases,
@@ -227,7 +237,7 @@ export function captureSession(
     readFinal: isRepo
       ? end
         ? (path) => git.showFile(root, end, path)
-        : (path) => git.readWorking(root, path)
+        : (path) => git.readWorking(root, path, 2 * 1024 * 1024)
       : undefined,
     changed,
     // Ignored files (`.env.local` and friends) are recorded as changed,

@@ -41,8 +41,6 @@ interface Item {
   badge?: React.ReactNode;
   /** How far the reader got, last time it was open here. */
   progress?: { fraction: number; done: boolean };
-  /** The pointer rests on it, or focus arrives: it may well be opened next. */
-  onIntent?: () => void;
 }
 
 function progressOf(
@@ -129,24 +127,8 @@ function usePage<T>(
   };
 }
 
-/** A row that holds the pointer for a moment is probably about to be opened. */
-function useIntent() {
-  const timer = React.useRef<ReturnType<typeof setTimeout>>(undefined);
-  return React.useMemo(
-    () => ({
-      start: (item: Item) => {
-        clearTimeout(timer.current);
-        timer.current = setTimeout(() => item.onIntent?.(), 200);
-      },
-      stop: () => clearTimeout(timer.current),
-    }),
-    [],
-  );
-}
-
 function Rows({ items }: { items: readonly Item[] }) {
   const list = React.useRef<HTMLDivElement>(null);
-  const intent = useIntent();
   // ↑ and ↓ move between rows; Enter opens one (it is a link).
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -177,9 +159,6 @@ function Rows({ items }: { items: readonly Item[] }) {
                 <a
                   data-row
                   href={item.href}
-                  onPointerEnter={item.onIntent ? () => intent.start(item) : undefined}
-                  onPointerLeave={intent.stop}
-                  onFocus={item.onIntent ? () => intent.start(item) : undefined}
                   onClick={() => rememberTitle(item.id, item.title)}
                   className="flex items-center gap-4 rounded-control px-3 py-2.5 focus-bar hover:bg-hover"
                 >
@@ -259,7 +238,6 @@ export function Library({
             <span className="shrink-0 text-2xs text-text-low">Saved</span>
           ) : undefined,
           progress: progressOf(listedProgress(item), 0, false),
-          onIntent: () => api.prefetchSession(item.id),
         })) ?? [])
       : (saved.page?.items.map((item: SavedListing): Item => ({
           id: item.id,

@@ -1,3 +1,4 @@
+import { sessionStreamer } from "./session-stream.ts";
 /**
  * The local service: a Vite plugin, so `pnpm dev:replay` is the whole tool —
  * no second process to start, no port to agree on, and it only ever listens
@@ -56,7 +57,14 @@ import {
   type FolderListing,
 } from "./projects.ts";
 import { findSession, listSessions } from "./sessions.ts";
-import { findSaved, idKey, listSaved, readReplay, saveReplay } from "./store.ts";
+import {
+  findSaved,
+  idKey,
+  listSaved,
+  readReplay,
+  saveReplay,
+  replayStamp,
+} from "./store.ts";
 
 export type { FolderListing };
 
@@ -262,11 +270,14 @@ export function createHandler(options: ReplayApiOptions) {
   // Real paths, as git reports a capture's root — so a symlinked or
   // non-top-level entry still finds the replays saved there.
   const configured = options.repos.map(real);
+  const streamSession = sessionStreamer(configured);
 
   // Every repository the player knows: the ones it was started for, the
   // ones added by hand, and every one a session ran in. A saved replay's id
   // names its repository by a hash of the root, so it survives a restart.
-  const byKey = new Map<string, string>();
+  const byKey = new Map<string, string>(
+    [...configured, ...readAdded()].map((root) => [idKey(root), root]),
+  );
   const knownRoots = (): string[] => {
     const fromSessions = listSessions().flatMap((session) =>
       session.cwd ? [rootOf(session.cwd)] : [],
@@ -403,7 +414,8 @@ export function createHandler(options: ReplayApiOptions) {
       /^\/curricula$/,
       (): StudyCatalog => {
         const catalog: StudyCatalog = { courses: [], problems: [] };
-        for (const root of knownRoots()) {
+        for (const root of new Set([...configured, ...readAdded()])) {
+          byKey.set(idKey(root), root);
           try {
             const course = readStudyCourse(root);
             if (course) catalog.courses.push(course);
@@ -491,6 +503,16 @@ export function createHandler(options: ReplayApiOptions) {
           (item) => `${item.title} ${item.repo} ${item.agent} ${item.id}`,
           (item) => item.project,
         );
+      },
+    ],
+    [
+      "GET",
+      new RegExp(`^${REPLAY}\\/stamp$`),
+      (match) => {
+        const root = rootByKey(match[1]!);
+        const stamp = root && replayStamp(root, match[2]!);
+        if (!stamp) throw new Problem(404, "not_found", "No such replay.");
+        return { stamp };
       },
     ],
     [
@@ -616,6 +638,24 @@ export function createHandler(options: ReplayApiOptions) {
         requestId,
         new Problem(400, "invalid_request", "Malformed URL."),
       );
+      return;
+    }
+    const stream =
+      request.method === "GET" && path.match(new RegExp(`^${SESSION}\\/stream$`));
+    if (stream) {
+      try {
+        streamSession(stream[1]!, response);
+      } catch (error) {
+        problem(
+          response,
+          requestId,
+          new Problem(
+            500,
+            "capture_failed",
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
+      }
       return;
     }
     // A replay as one HTML file: a download, not an envelope.
