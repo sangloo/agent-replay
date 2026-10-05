@@ -42,7 +42,7 @@ export function ProjectPicker({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex h-8 max-w-72 items-center gap-2 rounded-control px-2 text-sm focus-bar hover:bg-hover"
+          className="flex h-8 max-w-28 items-center gap-2 rounded-control px-2 text-sm focus-bar hover:bg-hover sm:max-w-72"
         >
           {current ? (
             <FolderGit2 aria-hidden className="icon-sm shrink-0 text-text-low" />

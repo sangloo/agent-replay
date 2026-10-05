@@ -105,4 +105,11 @@ it("reopens a session where it was left, and offers the start", async () => {
   expect(window.location.hash).toContain("at=3");
   fireEvent.click(screen.getByRole("button", { name: "Start from the beginning" }));
   expect(window.location.hash).not.toContain("at=");
+  // ⇧→ and ⇧← move a turn at a time.
+  fireEvent.keyDown(document.body, { key: "ArrowRight", shiftKey: true });
+  expect(window.location.hash).toContain("at=1");
+  fireEvent.keyDown(document.body, { key: "ArrowRight", shiftKey: true });
+  expect(window.location.hash).toContain("at=5");
+  fireEvent.keyDown(document.body, { key: "ArrowLeft", shiftKey: true });
+  expect(window.location.hash).toContain("at=1");
 });

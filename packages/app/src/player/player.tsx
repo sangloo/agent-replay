@@ -114,6 +114,8 @@ const SHORTCUTS: ShortcutGroup[] = [
       { keys: "space", description: "Play or pause — mid-change too" },
       { keys: "arrowright", description: "Play the next step (or finish this one)" },
       { keys: "arrowleft", description: "Previous step" },
+      { keys: "shift+arrowright", description: "Next prompt (in a course: lesson)" },
+      { keys: "shift+arrowleft", description: "Previous prompt (in a course: lesson)" },
       { keys: "home", description: "Back to the start" },
       { keys: "end", description: "To the end" },
       { keys: "n", description: "Next note" },
@@ -301,18 +303,24 @@ export function Player({
     isCourse ? "file" : "change",
     isView,
   );
-  const [filesOpen, setFilesOpen] = usePersistent(
+  // On a narrow screen the code comes first: panels open over it, on request.
+  const narrow = window.innerWidth < 760;
+  const [storedFilesOpen, setFilesOpen] = usePersistent(
     isCourse ? "course-files-open" : "files-open",
     !isCourse,
     isBoolean,
   );
+  const [narrowFiles, setNarrowFiles] = React.useState(false);
+  const filesOpen = narrow ? narrowFiles : storedFilesOpen;
   // Three panels crowd a laptop screen: the steps start shut below 1200px,
   // until the reviewer opens them (which is then remembered).
-  const [stepsOpen, setStepsOpen] = usePersistent(
+  const [storedStepsOpen, setStepsOpen] = usePersistent(
     isCourse ? "course-notes-open" : "notes-open",
     isCourse || window.innerWidth >= 1200,
     isBoolean,
   );
+  const [narrowSteps, setNarrowSteps] = React.useState(false);
+  const stepsOpen = narrow && !isCourse ? narrowSteps : storedStepsOpen;
   const filesWidth = usePanelWidth("files-width", 272);
   const stepsWidth = usePanelWidth(
     isCourse ? "course-notes-width" : "notes-width",
@@ -540,6 +548,19 @@ export function Player({
   );
   const nextNote = noted.find((index) => index + 1 > cursor);
   const prevNote = noted.filter((index) => index + 1 < cursor).at(-1);
+  // Where each turn starts: a prompt of the person's, or a course's lesson.
+  const turns = React.useMemo(
+    () =>
+      playback.frames
+        .filter(
+          ({ step }) =>
+            (step.kind === "prompt" && step.agent === "main") || step.kind === "lesson",
+        )
+        .map((frame) => frame.index),
+    [playback],
+  );
+  const nextTurn = turns.find((index) => index + 1 > cursor);
+  const prevTurn = turns.filter((index) => index + 1 < cursor).at(-1);
 
   // Scrubber over the visible steps; its cursor counts visible steps applied.
   const position = React.useMemo(
@@ -575,12 +596,12 @@ export function Player({
     setView(VIEWS[(at + 1) % VIEWS.length]!.value);
   }, [view, setView]);
   const toggleFiles = React.useCallback(
-    () => setFilesOpen(!filesOpen),
-    [filesOpen, setFilesOpen],
+    () => (narrow ? setNarrowFiles(!filesOpen) : setFilesOpen(!filesOpen)),
+    [narrow, filesOpen, setFilesOpen],
   );
   const toggleSteps = React.useCallback(
-    () => setStepsOpen(!stepsOpen),
-    [stepsOpen, setStepsOpen],
+    () => (narrow && !isCourse ? setNarrowSteps(!stepsOpen) : setStepsOpen(!stepsOpen)),
+    [narrow, isCourse, stepsOpen, setStepsOpen],
   );
 
   React.useEffect(() => {
@@ -604,6 +625,12 @@ export function Player({
       ) {
         return;
       }
+      if (event.shiftKey && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+        event.preventDefault();
+        const to = event.key === "ArrowRight" ? nextTurn : prevTurn;
+        if (to !== undefined) jump(to + 1);
+        return;
+      }
       const keys: Record<string, () => void> = {
         " ": toggle,
         ArrowRight: forward,
@@ -616,7 +643,8 @@ export function Player({
         "[": toggleFiles,
         "]": toggleSteps,
         e: () => {
-          setStepsOpen(true);
+          if (narrow && !isCourse) setNarrowSteps(true);
+          else setStepsOpen(true);
           setSide(
             isCourse
               ? side === "lesson"
@@ -628,7 +656,8 @@ export function Player({
           );
         },
         "/": () => {
-          setFilesOpen(true);
+          if (narrow) setNarrowFiles(true);
+          else setFilesOpen(true);
           requestAnimationFrame(() => filterRef.current?.focus());
         },
         "?": () => setHelp(true),
@@ -648,11 +677,14 @@ export function Player({
     playback.length,
     nextNote,
     prevNote,
+    nextTurn,
+    prevTurn,
     cycleView,
     toggleFiles,
     toggleSteps,
     setFilesOpen,
     setStepsOpen,
+    narrow,
     side,
     setSide,
     isCourse,
@@ -859,8 +891,21 @@ export function Player({
             ) : null}
           </span>
           {onSave ? (
-            <Button size="sm" variant="ghost" onClick={onSave} loading={saving}>
-              {saved ? "Update saved copy" : "Save to repo"}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onSave}
+              loading={saving}
+              title={
+                saved
+                  ? "Update the saved copy in the repository"
+                  : "Save to the repository’s .replays/"
+              }
+            >
+              <span className="hidden md:inline">
+                {saved ? "Update saved copy" : "Save to repo"}
+              </span>
+              <span className="md:hidden">Save</span>
             </Button>
           ) : null}
           {source ? (
@@ -871,7 +916,7 @@ export function Player({
               className="inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-3.5"
             >
               <Download aria-hidden />
-              Export
+              <span className="hidden md:inline">Export</span>
             </a>
           ) : null}
           <span className="flex items-center">
@@ -893,7 +938,11 @@ export function Player({
             >
               <PanelRight />
             </Tool>
-            <Tool label="Keyboard shortcuts ( ? )" onClick={() => setHelp(true)}>
+            <Tool
+              label="Keyboard shortcuts ( ? )"
+              onClick={() => setHelp(true)}
+              className="hidden md:inline-flex"
+            >
               <Keyboard />
             </Tool>
             <ThemeToggle />
@@ -956,7 +1005,7 @@ export function Player({
           </p>
         ) : null}
 
-        <div className="flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 flex-1">
           {filesOpen ? (
             <ResizablePanel
               side="right"
@@ -964,7 +1013,7 @@ export function Player({
               max={560}
               label="Resize the files panel"
               {...filesWidth}
-              className="study-files border-r border-line bg-surface-low"
+              className="study-files player-panel left-0 border-r border-line bg-surface-low"
             >
               <nav aria-label="Files" className="h-full">
                 <FilesPanel
@@ -1025,7 +1074,7 @@ export function Player({
               max={720}
               label="Resize the side panel"
               {...stepsWidth}
-              className="study-reading border-l border-line bg-surface-low"
+              className="study-reading player-panel right-0 border-l border-line bg-surface-low"
             >
               <aside aria-label="Session" className="flex h-full flex-col">
                 <div className="flex h-10 shrink-0 items-center border-b border-line px-2">

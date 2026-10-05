@@ -301,6 +301,18 @@
   line-height: 1.75;
 }
 @media (max-width: 760px) {
+  /* Reviewing on a phone: the code fills the screen; a panel opens over it. */
+  .player-panel {
+    position: absolute;
+    inset-block: 0;
+    z-index: 30;
+    width: min(100%, 22rem) !important;
+    box-shadow: var(--shadow-modal);
+  }
+  .study-player .player-panel {
+    position: relative;
+    box-shadow: none;
+  }
   .study-mobile-tabs {
     display: flex;
     flex-shrink: 0;

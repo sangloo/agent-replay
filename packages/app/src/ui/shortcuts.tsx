@@ -23,6 +23,7 @@ const KEY_NAME: Record<string, string> = {
   end: "End",
   escape: "Esc",
   enter: "Enter",
+  shift: "Shift",
 };
 
 export function Kbd({ children }: { children: React.ReactNode }) {

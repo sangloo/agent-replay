@@ -51,17 +51,20 @@ export function AppHeader({
         <span className="grid size-5 place-items-center rounded-[5px] bg-emphasis text-accent-text">
           <Play aria-hidden className="size-3 translate-x-px fill-current" />
         </span>
-        Replay
+        <span className="hidden sm:inline">Replay</span>
       </a>
       {picker ? (
         <>
-          <span aria-hidden className="text-text-low">
+          <span aria-hidden className="hidden text-text-low sm:inline">
             /
           </span>
-          {picker}
+          <span className="min-w-0 shrink">{picker}</span>
         </>
       ) : null}
-      <nav aria-label="Pages" className="ml-auto flex h-full items-stretch gap-1">
+      <nav
+        aria-label="Pages"
+        className="ml-auto flex h-full shrink-0 items-stretch gap-0.5 sm:gap-1"
+      >
         {PLACES.map((item) => (
           <a
             key={item.place}
@@ -69,7 +72,7 @@ export function AppHeader({
             title={item.hint}
             aria-current={item.place === place ? "page" : undefined}
             className={cn(
-              "relative flex items-center px-2.5 text-sm focus-bar",
+              "relative flex items-center px-1.5 text-sm focus-bar sm:px-2.5",
               item.place === place
                 ? "font-medium text-text-high after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-emphasis"
                 : "text-text-low hover:text-text-high",
@@ -79,7 +82,7 @@ export function AppHeader({
           </a>
         ))}
       </nav>
-      <span aria-hidden className="mx-1 h-5 w-px bg-line" />
+      <span aria-hidden className="mx-1 hidden h-5 w-px bg-line sm:block" />
       <ThemeToggle />
     </header>
   );

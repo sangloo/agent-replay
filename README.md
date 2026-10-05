@@ -89,6 +89,7 @@ is already there; **Open folder…** adds any other), open a session and press
 | ------------ | ---------------------------------------------------- |
 | `Space`      | play / pause — mid-change too                        |
 | `→` `←`      | next step (or finish the one typing) / previous step |
+| `⇧→` `⇧←`    | next / previous prompt (in a course: lesson)         |
 | `Home` `End` | the base commit / the end                            |
 | `N` `P`      | next / previous note                                 |
 | `V`          | the code view: change → since base → file            |
@@ -103,7 +104,13 @@ Three views of a file (`V`): **Change** — the change on screen, as a diff;
 view keeps playing: a change is always seen being made.
 
 The address carries the step (`#/session/<id>?at=42`), so a link opens on a
-moment.
+moment. Without one, a replay reopens where you left it in this browser, and
+the lists show how far along each one is.
+
+The steps panel shows one turn at a time: the prompt on screen and its
+changes, every other turn as a single line saying what it asked and how much
+it changed. **Changes** (the default), **Everything** or **Notes** choose what
+the list and the timeline show.
 
 ### Save a replay with the code
 
@@ -326,11 +333,11 @@ bounded at 2 MiB; binary and lockfile exclusions still apply.
 ### Connected lessons
 
 A course can carry an optional `.replays/curriculum.manifest` alongside its saved
-replays. **Learn / Chapters** shows the ordered chapters, prerequisites, a suggested
-next lesson and the last saved study position. **Mark reviewed** is an explicit
-reader checkpoint; playing a lesson does not mark it complete. Progress stays in
-this browser and is isolated by curriculum ID and revision. Existing replays need
-no migration.
+replays. The **Learn** tab then shows its map: the ordered chapters,
+prerequisites, a suggested next lesson, and each lesson done, in progress or not
+started. A lesson is done once you reach its end; **Mark as done** sets it by hand
+either way. Progress stays in this browser and is isolated by curriculum ID and
+revision. Existing replays need no migration.
 
 ```json
 {

@@ -38,8 +38,8 @@ Source, docs and issues: https://github.com/sangloo/agent-replay — MIT license
 ### Courses with chapters
 
 Add `.replays/curriculum.manifest` to organize saved lessons into chapters with
-prerequisites. The Learn view resumes your study position and offers explicit
-review checkpoints. Existing saved replays continue to work.
+prerequisites. The Learn tab resumes where you left off and marks each lesson done
+once you reach its end. Existing saved replays continue to work.
 
 ```sh
 replay export lesson.json --curriculum .replays/curriculum.manifest -o lesson.html
