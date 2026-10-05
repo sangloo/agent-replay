@@ -95,32 +95,22 @@ interface CodeLineProps {
   lit?: boolean;
   origin?: Origin;
   sources: Sources;
-  lineRef?: React.Ref<HTMLDivElement>;
   /** Shown after the code, dim, while the line is hovered. */
   blame?: Blame;
   onBlame?: (step: number) => void;
 }
 
 const CodeLine = React.memo(
-  function CodeLine({
-    line,
-    lit,
-    origin,
-    sources,
-    lineRef,
-    blame,
-    onBlame,
-  }: CodeLineProps) {
+  function CodeLine({ line, lit, origin, sources, blame, onBlame }: CodeLineProps) {
     const sign = SIGN[line.kind];
     return (
       <div
-        ref={lineRef}
+        data-row
         data-line={line.number === null ? undefined : line.number - 1}
         className={cn(
-          // Every row is one 22px line (text-code, no wrapping), and says so
-          // while skipped, so offsets below the fold are true and following
-          // the typing lands where it should.
-          "flex [contain-intrinsic-size:auto_1.375rem] [content-visibility:auto]",
+          // Every row is exactly one line of text-code, never wrapped: the
+          // pane draws only the rows in view and places them by index.
+          "flex h-[1.375rem]",
           ROW[line.kind],
           lit && "bg-emphasis-subtle",
           blame && line.kind === "context" && "bg-hover",
@@ -176,7 +166,6 @@ const CodeLine = React.memo(
     a.lit === b.lit &&
     a.origin === b.origin &&
     a.sources === b.sources &&
-    a.lineRef === b.lineRef &&
     a.blame === b.blame &&
     a.onBlame === b.onBlame,
 );
@@ -200,6 +189,35 @@ export interface CodeViewProps {
   focus?: readonly [number, number];
 }
 
+/** Rows drawn beyond the edges of the view, so a fast scroll stays filled. */
+const OVERSCAN = 16;
+/** The pane's padding above the first line, in px (py-4). */
+const PAD = 16;
+
+/**
+ * Syntax runs for a text, without holding up the frame that shows it: a
+ * small file is coloured at once; a large one shows plain for the moment it
+ * takes, then in colour.
+ */
+function useRuns(text: string, language: string | undefined): readonly Run[] {
+  const immediate = text.length <= 40_000;
+  const [late, setLate] = React.useState<{ text: string; runs: readonly Run[] }>();
+  React.useEffect(() => {
+    if (immediate) return;
+    const timer = setTimeout(
+      () => setLate({ text, runs: tokenize(text, language) }),
+      0,
+    );
+    return () => clearTimeout(timer);
+  }, [immediate, text, language]);
+  const now = React.useMemo(
+    () => (immediate ? tokenize(text, language) : undefined),
+    [immediate, text, language],
+  );
+  return now ?? (late?.text === text ? late.runs : NO_RUNS);
+}
+const NO_RUNS: readonly Run[] = [];
+
 export function CodeView({
   path,
   diff,
@@ -218,18 +236,26 @@ export function CodeView({
   }, [diff, content, progress, hideRemoved]);
   const language = languageOf(path);
   // Tokenized once per version of the file, not per frame of typing.
-  const sources = React.useMemo<Sources>(() => {
-    if (diff) {
-      return {
-        before: tokenize(diff.before ?? "", language),
-        after: tokenize(diff.after ?? "", language),
-      };
-    }
-    const runs = tokenize(content ?? "", language);
-    return { before: runs, after: runs };
-  }, [diff, content, language]);
+  const before = useRuns(diff ? (diff.before ?? "") : (content ?? ""), language);
+  const after = useRuns(diff ? (diff.after ?? "") : (content ?? ""), language);
+  const sources = React.useMemo<Sources>(() => ({ before, after }), [before, after]);
 
   const scroller = React.useRef<HTMLDivElement>(null);
+  const [row, setRow] = React.useState(22);
+  const [view, setView] = React.useState({ top: 0, height: 800 });
+  React.useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box) return;
+    // One line's height in px, whatever the root font size.
+    const probe = box.querySelector<HTMLElement>("[data-row]");
+    if (probe && probe.offsetHeight) setRow(probe.offsetHeight);
+    const measure = () => setView({ top: box.scrollTop, height: box.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+
   const target = lines.findIndex((line) => line.caret !== undefined);
   const focused = (line: Line) =>
     focus !== undefined &&
@@ -239,7 +265,6 @@ export function CodeView({
   const lit = focus ? lines.findIndex(focused) : -1;
   const anchor =
     target >= 0 ? target : lit >= 0 ? lit : lines.findIndex((line) => line.hot);
-  const anchorRef = React.useRef<HTMLDivElement>(null);
 
   // Keep the typing point — or, before it, the start of the change — in the
   // upper middle of the view. A new file opens there at once; within a file
@@ -247,10 +272,9 @@ export function CodeView({
   // when the distance is more than a screen or motion is reduced.
   const opened = React.useRef(false);
   React.useLayoutEffect(() => {
-    const row = anchorRef.current;
     const box = scroller.current;
-    if (!row || !box) return;
-    const top = row.offsetTop;
+    if (!box || anchor < 0) return;
+    const top = PAD + anchor * row;
     const height = box.clientHeight;
     const inView =
       top >= box.scrollTop + height * 0.12 && top <= box.scrollTop + height * 0.72;
@@ -263,13 +287,14 @@ export function CodeView({
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     opened.current = true;
     box.scrollTo({ top: goal, behavior: still ? "instant" : "smooth" });
-  }, [anchor, lines]);
+    if (still) setView((last) => ({ ...last, top: box.scrollTop }));
+  }, [anchor, lines, row]);
 
   // The hovered line says who wrote it, inline and dim at its end.
   const [hover, setHover] = React.useState<number>();
   const onMove = (event: React.MouseEvent) => {
-    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-line]");
-    const line = row?.dataset.line === undefined ? undefined : Number(row.dataset.line);
+    const el = (event.target as HTMLElement).closest<HTMLElement>("[data-line]");
+    const line = el?.dataset.line === undefined ? undefined : Number(el.dataset.line);
     if (line !== hover) setHover(line);
   };
   const blame = React.useMemo(
@@ -277,25 +302,60 @@ export function CodeView({
     [hover, origins, blameOf],
   );
 
+  const first = Math.max(0, Math.floor((view.top - PAD) / row) - OVERSCAN);
+  const last = Math.min(
+    lines.length,
+    Math.ceil((view.top + view.height) / row) + OVERSCAN,
+  );
+  // The widest line sets the scroll width, so it does not change as rows
+  // come and go.
+  const widest = React.useMemo(
+    () =>
+      lines.reduce(
+        (most, line) =>
+          Math.max(
+            most,
+            line.spans.reduce((sum, span) => sum + span.text.length, 0),
+          ),
+        0,
+      ),
+    [lines],
+  );
+
   return (
     <div
       ref={scroller}
       onMouseMove={onMove}
       onMouseLeave={() => setHover(undefined)}
+      onScroll={(event) => {
+        const top = event.currentTarget.scrollTop;
+        setView((last) => (last.top === top ? last : { ...last, top }));
+      }}
       className="relative h-full overflow-auto py-4 font-mono text-code text-text-high"
     >
-      {lines.map((line, i) => (
-        <CodeLine
-          key={i}
-          line={line}
-          origin={line.number === null ? undefined : origins?.[line.number - 1]}
-          sources={sources}
-          lineRef={i === anchor ? anchorRef : undefined}
-          lit={focused(line)}
-          blame={line.number !== null && line.number - 1 === hover ? blame : undefined}
-          onBlame={onBlame}
-        />
-      ))}
+      <div
+        style={{
+          height: lines.length * row,
+          minWidth: `calc(${widest}ch + 6rem)`,
+        }}
+        className="relative"
+      >
+        <div style={{ transform: `translateY(${first * row}px)` }}>
+          {lines.slice(first, last).map((line, i) => (
+            <CodeLine
+              key={first + i}
+              line={line}
+              origin={line.number === null ? undefined : origins?.[line.number - 1]}
+              sources={sources}
+              lit={focused(line)}
+              blame={
+                line.number !== null && line.number - 1 === hover ? blame : undefined
+              }
+              onBlame={onBlame}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

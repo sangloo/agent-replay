@@ -7,6 +7,7 @@ import { CourseMap } from "./course-library";
 import {
   lessonProgressKey,
   readStudyProgress,
+  replayProgressKey,
   saveStudyProgress,
 } from "./study-progress";
 const curriculum: Curriculum = {
@@ -59,29 +60,43 @@ beforeEach(() => {
   window.history.replaceState(null, "", "#/replay/one");
   Element.prototype.scrollIntoView = () => {};
 });
-it("resumes saved steps, honors explicit deep links, and marks reviewed only on request", () => {
+it("resumes saved steps, honors explicit deep links, and completes a lesson at its end", () => {
   const key = lessonProgressKey("test-course", "01", "pin");
-  saveStudyProgress(key, { cursor: 3, reviewed: false, updatedAt: 1 });
+  saveStudyProgress(key, { cursor: 2, reviewed: false, updatedAt: 1, total: 4 });
   const view = render(
     <ThemeProvider>
       <Player replay={replay} study={study} />
     </ThemeProvider>,
   );
-  expect(window.location.hash).toContain("at=3");
+  expect(window.location.hash).toContain("at=2");
+  expect(screen.getByText(/Picked up where you left off/)).toBeInTheDocument();
   expect(screen.queryByRole("combobox", { name: "Speed" })).not.toBeInTheDocument();
   expect(
-    screen.queryByRole("combobox", { name: "Steps shown" }),
-  ).not.toBeInTheDocument();
-  expect(
-    screen.getByRole("button", { name: "Mark reviewed" }).closest("footer"),
+    screen.getByRole("button", { name: "Mark as done" }).closest("footer"),
   ).not.toBeNull();
   expect(
     screen.getByRole("link", { name: "Next lesson" }).closest("footer"),
   ).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Next explanation →" }));
-  expect(window.location.hash).toContain("at=4");
+  expect(window.location.hash).toContain("at=3");
   expect(readStudyProgress(key)?.reviewed).toBe(false);
-  fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+  // The last explanation is the end of the lesson: reaching it completes it.
+  fireEvent.click(screen.getByRole("button", { name: "Next explanation →" }));
+  expect(window.location.hash).toContain("at=4");
+  expect(readStudyProgress(key)).toMatchObject({
+    reviewed: true,
+    furthest: 4,
+    total: 4,
+  });
+  expect(screen.getByRole("button", { name: "Done" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByText("Lesson complete")).toBeInTheDocument();
+  // Marked not done by hand, it stays so, even standing at the end.
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(readStudyProgress(key)?.reviewed).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
   expect(readStudyProgress(key)?.reviewed).toBe(true);
   view.unmount();
   render(
@@ -90,10 +105,38 @@ it("resumes saved steps, honors explicit deep links, and marks reviewed only on 
     </ThemeProvider>,
   );
   expect(window.location.hash).toContain("at=2");
-  expect(screen.getByRole("button", { name: "Reviewed" })).toHaveAttribute(
+  expect(screen.queryByText(/Picked up where you left off/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Done" })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
+  cleanup();
+});
+it("counts a lesson left at its end before lessons completed themselves as done", () => {
+  const key = lessonProgressKey("test-course", "01", "pin");
+  saveStudyProgress(key, { cursor: 4, reviewed: false, updatedAt: 1 });
+  render(
+    <ThemeProvider>
+      <Player replay={replay} study={study} />
+    </ThemeProvider>,
+  );
+  expect(screen.getByRole("button", { name: "Done" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(readStudyProgress(key)?.reviewed).toBe(true);
+  cleanup();
+});
+it("keeps a course's progress under the replay too, for lists that do not know the curriculum", () => {
+  render(
+    <ThemeProvider>
+      <Player replay={replay} study={study} at={3} />
+    </ThemeProvider>,
+  );
+  expect(readStudyProgress(replayProgressKey("one", "pin"))).toMatchObject({
+    cursor: 3,
+    total: 4,
+  });
   cleanup();
 });
 it("resumes an unfinished lesson and advances the suggested path after explicit review", () => {
@@ -128,7 +171,7 @@ it("uses the curriculum revision for progress and skips an unavailable resume ta
       <Player replay={replay} study={{ ...study, curriculum: changed }} />
     </ThemeProvider>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+  fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
   expect(
     readStudyProgress(lessonProgressKey(changed.id, "01", changed.revision))?.reviewed,
   ).toBe(true);

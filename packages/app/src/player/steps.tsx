@@ -2,6 +2,7 @@ import type { Frame, NoteLevel, Replay, Step } from "@agent-replay/core";
 import { cn } from "@/ui";
 import {
   BookOpen,
+  ChevronRight,
   FileMinus,
   FilePen,
   FilePlus,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 
+import { Choice } from "../choice";
 import { firstLine, stepLabel, when } from "../labels";
 import { Markdown } from "./markdown";
 
@@ -203,7 +205,6 @@ function Detail({
   return (
     <div className="flex flex-col gap-3 px-4 pt-1 pb-4 pl-10 text-sm">
       <p className="text-2xs text-text-low">
-        Step {frame.index + 1} of {replay.steps.length} ·{" "}
         <span className="font-mono">{when(step.at, replay)}</span>
         {step.agent !== "main" ? " · subagent" : ""}
         {change && !change.applied ? " · could not be applied" : ""}
@@ -284,6 +285,9 @@ function Body({ step }: { step: Step }) {
   }
 }
 
+/** Which steps the list and the timeline show. */
+export type Filter = "all" | "changes" | "notes";
+
 export interface StepListProps {
   replay: Replay;
   frames: readonly Frame[];
@@ -292,12 +296,30 @@ export interface StepListProps {
   /** Steps applied; the current step is `cursor - 1`. */
   cursor: number;
   onJump: (cursor: number) => void;
+  /** The filter, offered above the list; absent for a course, which shows everything. */
+  filter?: Filter;
+  onFilter?: (filter: Filter) => void;
+  /** Steps with a note, for the filter's count. */
+  notes?: number;
 }
 
+interface Group {
+  prompt?: Frame;
+  rows: Frame[];
+  /** Files the group's changes touch. */
+  files: number;
+}
+
+/** A turn this long shows the steps around the one on screen, and more on request. */
+const WINDOW = 120;
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /**
- * The session as a list: each prompt heads the steps that answered it, the
- * step on screen is open, what is done reads full and what is ahead reads
- * quiet. Click any step to go there.
+ * The session as a list, a turn at a time: the turn on screen is open and
+ * every other one is a line saying what it asked and how much it changed,
+ * so even a session of thousands of steps reads as its few dozen prompts.
+ * What is done reads full, what is ahead quiet; click anything to go there.
  */
 export const StepList = React.memo(function StepList({
   replay,
@@ -305,25 +327,35 @@ export const StepList = React.memo(function StepList({
   visible,
   cursor,
   onJump,
+  filter,
+  onFilter,
+  notes = 0,
 }: StepListProps) {
   // Group the visible steps under the prompt they answer.
   const groups = React.useMemo(() => {
-    const out: { prompt?: Frame; rows: Frame[] }[] = [];
+    const out: Group[] = [];
     const shown = new Set(visible);
-    let group: { prompt?: Frame; rows: Frame[] } = { rows: [] };
+    let group: Group = { rows: [], files: 0 };
+    const close = () => {
+      if (!group.prompt && !group.rows.length) return;
+      group.files = new Set(
+        group.rows.flatMap((f) => (f.change ? [f.change.path] : [])),
+      ).size;
+      out.push(group);
+    };
     for (const frame of frames) {
       // A prompt heads what answered it; in a course, a lesson heads its steps.
       if (
         (frame.step.kind === "prompt" && frame.step.agent === "main") ||
         frame.step.kind === "lesson"
       ) {
-        if (group.prompt || group.rows.length) out.push(group);
-        group = { prompt: frame, rows: [] };
+        close();
+        group = { prompt: frame, rows: [], files: 0 };
         continue;
       }
       if (shown.has(frame.index)) group.rows.push(frame);
     }
-    if (group.prompt || group.rows.length) out.push(group);
+    close();
     return out;
   }, [frames, visible]);
 
@@ -332,20 +364,82 @@ export const StepList = React.memo(function StepList({
     () => visible.filter((index) => index < cursor).at(-1) ?? -1,
     [visible, cursor],
   );
+  // The turn on screen: the last whose prompt is at or before the cursor.
+  const currentGroup = React.useMemo(() => {
+    let at = -1;
+    groups.forEach((group, i) => {
+      const first = group.prompt?.index ?? group.rows[0]?.index ?? Infinity;
+      if (first < cursor) at = i;
+    });
+    return at;
+  }, [groups, cursor]);
+  const [opened, setOpened] = React.useState<ReadonlySet<number>>(new Set());
+  // How many more steps of a long turn the reader asked to see, for this turn.
+  const [shownMore, setMore] = React.useState({
+    group: currentGroup,
+    before: 0,
+    after: 0,
+  });
+  const more =
+    shownMore.group === currentGroup
+      ? shownMore
+      : { group: currentGroup, before: 0, after: 0 };
+
   const currentRef = React.useRef<HTMLLIElement>(null);
+  const headRef = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => {
-    currentRef.current?.scrollIntoView({ block: "nearest" });
-  }, [current]);
-  // Opened mid-session (a link to a step), the list starts there.
-  React.useEffect(() => {
-    currentRef.current?.scrollIntoView({ block: "center" });
-  }, []);
+    (currentRef.current ?? headRef.current)?.scrollIntoView({ block: "nearest" });
+  }, [current, currentGroup]);
 
   const place = (index: number): Place =>
     index === current ? "current" : index < current ? "done" : "ahead";
+  const toggle = (g: number) =>
+    setOpened((open) => {
+      const next = new Set(open);
+      if (next.has(g)) next.delete(g);
+      else next.add(g);
+      return next;
+    });
+  const unit = filter === "changes" ? "change" : "step";
+  let lessons = 0;
 
   return (
     <div className="flex flex-col pb-6">
+      {filter && onFilter ? (
+        <div className="sticky top-0 z-raised flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface-low px-2">
+          <Choice<Filter>
+            label="Steps shown"
+            value={filter}
+            onChange={onFilter}
+            options={[
+              {
+                value: "changes",
+                label: "Changes",
+                hint: "File changes, under the prompts they answer",
+              },
+              {
+                value: "all",
+                label: "Everything",
+                hint: "Every step: commands, replies, changes",
+              },
+              ...(notes
+                ? [
+                    {
+                      value: "notes" as const,
+                      label: (
+                        <>
+                          Notes{" "}
+                          <span className="font-normal tabular-nums">{notes}</span>
+                        </>
+                      ),
+                      hint: "Only the steps with a reviewer's note",
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        </div>
+      ) : null}
       <button
         type="button"
         onClick={() => onJump(0)}
@@ -356,68 +450,165 @@ export const StepList = React.memo(function StepList({
       >
         <GitCommitHorizontal aria-hidden className="icon-sm shrink-0" />
         <span className="truncate">
-          Base commit
+          {replay.source === "course" ? "Empty repository" : "Base commit"}
           {replay.repo.base ? (
             <span className="font-mono"> {replay.repo.base.slice(0, 7)}</span>
           ) : null}
         </span>
       </button>
-      {groups.map((group, g) => (
-        <section key={group.prompt?.index ?? `g${g}`} className="flex flex-col">
-          {group.prompt &&
-          (group.prompt.step.kind === "prompt" ||
-            group.prompt.step.kind === "lesson") ? (
-            <button
-              type="button"
-              onClick={() => onJump(group.prompt!.index + 1)}
-              className={cn(
-                "sticky top-0 z-raised flex flex-col gap-0.5 border-y border-line bg-surface-base px-4 py-2 text-left focus-bar",
-                group.prompt.index === current && "bg-active",
-              )}
-            >
-              <span className="text-2xs text-text-low">
-                {group.prompt.step.kind === "lesson"
-                  ? `Lesson ${g + (groups[0]?.prompt ? 1 : 0)}`
-                  : `Prompt · ${when(group.prompt.step.at, replay)}`}
-              </span>
-              <span
+      {groups.map((group, g) => {
+        const isLesson = group.prompt?.step.kind === "lesson";
+        if (isLesson) lessons++;
+        const here = g === currentGroup;
+        const open = here || opened.has(g);
+        const reached = (group.prompt?.index ?? group.rows[0]?.index ?? 0) < cursor;
+        let rows = group.rows;
+        let hiddenBefore = 0;
+        let hiddenAfter = 0;
+        if (open && rows.length > WINDOW * 2) {
+          const at = Math.max(
+            0,
+            rows.findIndex((f) => f.index >= current),
+          );
+          const from = Math.max(0, at - WINDOW / 2 - more.before);
+          const to = Math.min(rows.length, at + WINDOW / 2 + more.after);
+          hiddenBefore = from;
+          hiddenAfter = rows.length - to;
+          rows = rows.slice(from, to);
+        }
+        return (
+          <section
+            key={group.prompt?.index ?? `g${g}`}
+            // A closed turn is one line: off screen, the browser skips it.
+            className={cn(
+              "flex flex-col",
+              !open &&
+                "[contain-intrinsic-size:auto_3.25rem] [content-visibility:auto]",
+            )}
+          >
+            {group.prompt &&
+            (group.prompt.step.kind === "prompt" ||
+              group.prompt.step.kind === "lesson") ? (
+              <div
                 className={cn(
-                  "line-clamp-2 text-xs",
-                  group.prompt.step.kind === "lesson" && "font-medium",
-                  group.prompt.index <= current ? "text-text-high" : "text-text-low",
+                  "flex border-b border-line bg-surface-base",
+                  open && "sticky top-0 z-raised",
+                  open && filter && onFilter && "top-9",
+                  group.prompt.index === current && "bg-active",
                 )}
               >
-                {group.prompt.step.kind === "lesson"
-                  ? group.prompt.step.title
-                  : firstLine(group.prompt.step.text, 200)}
-              </span>
-            </button>
-          ) : null}
-          {group.prompt && group.prompt.index === current ? (
-            <ul>
-              <Row
-                frame={group.prompt}
-                replay={replay}
-                place="current"
-                onJump={onJump}
-                rowRef={currentRef}
-              />
-            </ul>
-          ) : null}
-          <ul className="flex flex-col py-1">
-            {group.rows.map((frame) => (
-              <Row
-                key={frame.index}
-                frame={frame}
-                replay={replay}
-                place={place(frame.index)}
-                onJump={onJump}
-                rowRef={frame.index === current ? currentRef : undefined}
-              />
-            ))}
-          </ul>
-        </section>
-      ))}
+                <button
+                  ref={here ? headRef : undefined}
+                  type="button"
+                  onClick={() => onJump(group.prompt!.index + 1)}
+                  className="flex min-w-0 flex-1 flex-col gap-0.5 py-2 pl-4 text-left focus-bar"
+                >
+                  <span className="text-2xs text-text-low">
+                    {group.prompt.step.kind === "lesson"
+                      ? `Lesson ${lessons}`
+                      : `Prompt · ${when(group.prompt.step.at, replay)}`}
+                    {!open && group.rows.length
+                      ? ` · ${plural(group.rows.length, unit)}${group.files ? ` · ${plural(group.files, "file")}` : ""}`
+                      : ""}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-xs",
+                      open ? "line-clamp-3" : "line-clamp-1",
+                      isLesson && "font-medium",
+                      reached ? "text-text-high" : "text-text-low",
+                    )}
+                  >
+                    {group.prompt.step.kind === "lesson"
+                      ? group.prompt.step.title
+                      : firstLine(group.prompt.step.text, 240)}
+                  </span>
+                </button>
+                {!here && group.rows.length ? (
+                  <button
+                    type="button"
+                    onClick={() => toggle(g)}
+                    aria-expanded={open}
+                    aria-label={
+                      open ? "Hide this turn's steps" : "Show this turn's steps"
+                    }
+                    className="flex w-8 shrink-0 items-center justify-center text-text-low focus-bar hover:text-text-high"
+                  >
+                    <ChevronRight
+                      aria-hidden
+                      className={cn(
+                        "size-3.5 transition-transform duration-fast",
+                        open && "rotate-90",
+                      )}
+                    />
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {group.prompt && group.prompt.index === current ? (
+              <ul>
+                <Row
+                  frame={group.prompt}
+                  replay={replay}
+                  place="current"
+                  onJump={onJump}
+                  rowRef={currentRef}
+                />
+              </ul>
+            ) : null}
+            {open && group.rows.length ? (
+              <ul className="flex flex-col py-1">
+                {hiddenBefore ? (
+                  <li>
+                    <More
+                      onClick={() => setMore({ ...more, before: more.before + WINDOW })}
+                    >
+                      {plural(hiddenBefore, `earlier ${unit}`)}
+                    </More>
+                  </li>
+                ) : null}
+                {rows.map((frame) => (
+                  <Row
+                    key={frame.index}
+                    frame={frame}
+                    replay={replay}
+                    place={place(frame.index)}
+                    onJump={onJump}
+                    rowRef={frame.index === current ? currentRef : undefined}
+                  />
+                ))}
+                {hiddenAfter ? (
+                  <li>
+                    <More
+                      onClick={() => setMore({ ...more, after: more.after + WINDOW })}
+                    >
+                      {plural(hiddenAfter, `later ${unit}`)}
+                    </More>
+                  </li>
+                ) : null}
+              </ul>
+            ) : null}
+          </section>
+        );
+      })}
     </div>
   );
 });
+
+function More({
+  children,
+  onClick,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-8 w-full items-center px-4 pl-10 text-left text-2xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
+    >
+      Show {children}
+    </button>
+  );
+}

@@ -6,7 +6,6 @@ import { cn } from "./cn";
 export type Tone = "prompt" | "note" | "pass" | "fail" | "commit";
 
 export interface ScrubStep {
-  label: string;
   tone?: Tone;
 }
 
@@ -25,6 +24,8 @@ export interface ScrubberProps {
   label: string;
   /** What position 0 is called. */
   baseLabel: string;
+  /** What a position is called — asked only for the one hovered or focused. */
+  labelOf: (position: number) => string;
   onJump: (position: number) => void;
 }
 
@@ -38,6 +39,7 @@ export const Scrubber = React.memo(function Scrubber({
   cursor,
   label,
   baseLabel,
+  labelOf,
   onJump,
 }: ScrubberProps) {
   const track = React.useRef<HTMLDivElement>(null);
@@ -53,7 +55,7 @@ export const Scrubber = React.memo(function Scrubber({
     return { position: Math.round((x / box.width) * n), x };
   };
   const nameOf = (position: number) =>
-    position === 0 ? baseLabel : (steps[position - 1]?.label ?? "");
+    position === 0 ? baseLabel : position <= n ? labelOf(position) : "";
 
   const marks = React.useMemo(
     () =>

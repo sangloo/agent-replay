@@ -7,12 +7,14 @@ import {
   isChange,
   play,
   sourceReferenceIndex,
+  type Playback,
   type SourceDestination,
   type Replay,
   type StudyContext,
 } from "@agent-replay/core";
 import {
   ArrowLeft,
+  Check,
   Download,
   Keyboard,
   PanelLeft,
@@ -26,6 +28,7 @@ import * as React from "react";
 
 import {
   Button,
+  cn,
   IconButton,
   ResizablePanel,
   Scrubber,
@@ -42,31 +45,38 @@ import {
 
 import type { ReplaySource } from "../api";
 import { Choice } from "../choice";
-import { CourseActions, CourseOutline } from "../course-navigation";
-import {
-  readStudyProgress,
-  saveStudyProgress,
-  studyProgressKey,
-} from "../study-progress";
+import { CourseOutline, LessonActions } from "../course-navigation";
 import { firstLine, stepLabel, when } from "../labels";
 import { isBoolean, isNumber, oneOf, usePersistent } from "../persist";
+import {
+  furthestOf,
+  progressKeys,
+  readStudyProgress,
+  saveStudyProgress,
+} from "../study-progress";
 import { ThemeToggle } from "../theme-toggle";
 import { Caption } from "./caption";
-import { CodeView, type Blame, type Origin } from "./code-view";
+import { CodeView, type Blame, type CodeViewProps, type Origin } from "./code-view";
 import type { Diffable } from "./compose";
 import { EvidencePanel } from "./evidence";
 import { FilesPanel } from "./files";
 import { LessonPanel } from "./lesson";
+import { lessonsOf } from "./lessons";
 import { SourceNavigationContext } from "./source-context";
-import { StepList } from "./steps";
-import { SPEEDS, usePlayback, type Speed } from "./use-playback";
+import { StepList, type Filter } from "./steps";
+import {
+  SPEEDS,
+  usePlayback,
+  useProgress,
+  type ProgressStore,
+  type Speed,
+} from "./use-playback";
 import { useRepo } from "./use-repo";
 
 function percent(part: number, whole: number): string {
   return whole ? `${Math.round((part / whole) * 100)}%` : "–";
 }
 
-type Filter = "all" | "changes" | "notes";
 const isFilter = oneOf<Filter>("all", "changes", "notes");
 
 /**
@@ -104,7 +114,7 @@ const SHORTCUTS: ShortcutGroup[] = [
       { keys: "space", description: "Play or pause — mid-change too" },
       { keys: "arrowright", description: "Play the next step (or finish this one)" },
       { keys: "arrowleft", description: "Previous step" },
-      { keys: "home", description: "Back to the base commit" },
+      { keys: "home", description: "Back to the start" },
       { keys: "end", description: "To the end" },
       { keys: "n", description: "Next note" },
       { keys: "p", description: "Previous note" },
@@ -115,8 +125,8 @@ const SHORTCUTS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "v", description: "Last change, since base, or the file" },
       { keys: "[", description: "Show or hide the files" },
-      { keys: "]", description: "Show or hide the steps" },
-      { keys: "e", description: "Steps or evidence" },
+      { keys: "]", description: "Show or hide the side panel" },
+      { keys: "e", description: "Steps or evidence (in a course: lesson or steps)" },
       { keys: "/", description: "Filter the files" },
       { keys: "?", description: "These shortcuts" },
     ],
@@ -143,6 +153,53 @@ function Tool(props: React.ComponentProps<typeof IconButton>) {
   return <IconButton variant="ghost" size="sm" {...props} />;
 }
 
+/**
+ * Work that would hold up the first paint of a long replay — the net totals,
+ * coverage — done just after it, so the player is on screen at once and the
+ * numbers arrive a moment later.
+ */
+function useAfterPaint<K, T>(
+  key: K | undefined,
+  compute: (key: K) => T,
+): T | undefined {
+  const [done, setDone] = React.useState<{ key: K; value: T }>();
+  React.useEffect(() => {
+    if (key === undefined) return;
+    const timer = setTimeout(() => setDone({ key, value: compute(key) }), 30);
+    return () => clearTimeout(timer);
+  }, [key, compute]);
+  return done && done.key === key ? done.value : undefined;
+}
+const totalsOf = (playback: Playback) => playback.totals;
+const coverageReady = (playback: Playback) => (playback.coverageAt(0), true);
+
+/** The code, typing in as the step plays: the one part that redraws every frame. */
+function LiveCode({
+  store,
+  live,
+  origins,
+  ...props
+}: Omit<CodeViewProps, "progress"> & { store: ProgressStore; live: boolean }) {
+  const progress = useProgress(store);
+  const shown = live ? progress : 1;
+  return (
+    <CodeView {...props} progress={shown} origins={shown >= 1 ? origins : undefined} />
+  );
+}
+
+/** How far the change on screen has played, under the file bar. */
+function LiveBar({ store, live }: { store: ProgressStore; live: boolean }) {
+  const progress = useProgress(store);
+  if (!live || progress >= 1) return null;
+  return (
+    <span
+      aria-hidden
+      className="absolute bottom-0 left-0 h-0.5 bg-emphasis"
+      style={{ width: `${progress * 100}%` }}
+    />
+  );
+}
+
 export interface PlayerProps {
   replay: Replay;
   study?: StudyContext;
@@ -158,8 +215,10 @@ export interface PlayerProps {
   /** It already has a saved copy, which saving replaces. */
   saved?: boolean;
   saving?: boolean;
-  /** Back to the list; absent in a replay exported as a file. */
+  /** Back to where the reader came from; absent in a replay exported as a file. */
   onBack?: () => void;
+  /** Where Back goes, in a word: "Sessions", "Saved", "Learn". */
+  backLabel?: string;
   /** Something to say above the panels: a newer version of a course, say. */
   notice?: React.ReactNode;
 }
@@ -175,6 +234,7 @@ export function Player({
   saved,
   saving,
   onBack,
+  backLabel,
   notice,
 }: PlayerProps) {
   const playback = React.useMemo(() => play(replay), [replay]);
@@ -202,16 +262,32 @@ export function Player({
         .map((frame) => frame.index),
     [filter, playback, replay.notes],
   );
-  const progressKey = studyProgressKey(replay, study);
-  const [savedProgress] = React.useState(() =>
-    isCourse ? readStudyProgress(progressKey) : undefined,
+
+  // Where the reader left this replay, the last time it was open here.
+  const keys = progressKeys(replay, study);
+  const [savedProgress] = React.useState(() => readStudyProgress(keys[0]!));
+  // Saves from before lessons completed themselves knew no total: one left
+  // at the end was finished.
+  const [reviewed, setReviewed] = React.useState(
+    Boolean(
+      savedProgress &&
+      (savedProgress.reviewed ||
+        (savedProgress.total === undefined &&
+          replay.steps.length > 0 &&
+          savedProgress.cursor >= replay.steps.length)),
+    ),
   );
-  const [reviewed, setReviewed] = React.useState(savedProgress?.reviewed ?? false);
   const [studyPane, setStudyPane] = React.useState<"reading" | "code">("reading");
-  const initial =
-    at ?? savedProgress?.cursor ?? (isCourse ? Math.min(2, replay.steps.length) : 0);
+  const resumed =
+    at === undefined && savedProgress && savedProgress.cursor > 0
+      ? Math.min(savedProgress.cursor, replay.steps.length)
+      : undefined;
+  const initial = at ?? resumed ?? (isCourse ? Math.min(2, replay.steps.length) : 0);
   const transport = usePlayback(playback.frames, visible, initial);
-  const { cursor, progress, playing } = transport;
+  const { cursor, playing } = transport;
+  // Said once, on opening where the reader left off; gone once they move.
+  const [resumeDismissed, setResumeDismissed] = React.useState(false);
+  const resumeNote = resumed !== undefined && !resumeDismissed && cursor === initial;
 
   // The address says where the replay is, so a link opens on this moment.
   React.useEffect(() => {
@@ -240,7 +316,7 @@ export function Player({
   const filesWidth = usePanelWidth("files-width", 272);
   const stepsWidth = usePanelWidth(
     isCourse ? "course-notes-width" : "notes-width",
-    isCourse ? 480 : 340,
+    isCourse ? 480 : 360,
   );
   const [storedSide, setSide] = usePersistent<Side>(
     isCourse ? "course-side" : "side",
@@ -292,10 +368,35 @@ export function Player({
     [jump, visible],
   );
   const activeReference = reference?.cursor === cursor ? reference : undefined;
+
+  // Progress: where the reader is, the furthest they have been, and — for a
+  // lesson — done once they reach its end. Saved as they go, so closing the
+  // tab loses nothing.
+  const total = replay.steps.length;
+  const [furthest, setFurthest] = React.useState(
+    savedProgress ? furthestOf(savedProgress) : 0,
+  );
+  // Following a source reference is a look ahead, not progress.
+  if (!activeReference && cursor > furthest) {
+    setFurthest(cursor);
+    // Reaching the end of a lesson completes it — once: marked not done by
+    // hand afterwards, it stays so.
+    if (isCourse && total > 0 && cursor >= total && furthest < total) setReviewed(true);
+  }
   React.useEffect(() => {
-    if (isCourse && !activeReference)
-      saveStudyProgress(progressKey, { cursor, reviewed, updatedAt: Date.now() });
-  }, [cursor, reviewed, isCourse, progressKey, activeReference]);
+    if (activeReference) return;
+    for (const key of keys)
+      saveStudyProgress(key, {
+        cursor,
+        reviewed,
+        furthest,
+        total,
+        updatedAt: Date.now(),
+      });
+    // `keys` is derived from the replay and study, both fixed for a player.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor, reviewed, furthest, total, activeReference]);
+
   const sourceIndex = React.useMemo(() => sourceReferenceIndex(replay), [replay]);
   const navigation = React.useMemo(
     () => ({
@@ -322,8 +423,10 @@ export function Player({
   const changesOf = React.useMemo(() => {
     const map = new Map<string, number[]>();
     for (const f of playback.frames) {
-      if (f.change?.applied)
-        map.set(f.change.path, [...(map.get(f.change.path) ?? []), f.index]);
+      if (!f.change?.applied) continue;
+      const list = map.get(f.change.path);
+      if (list) list.push(f.index);
+      else map.set(f.change.path, [f.index]);
     }
     return map;
   }, [playback]);
@@ -355,41 +458,45 @@ export function Player({
     };
   }, [view, path, inReplay, playback, cursor]);
 
+  // What the code pane shows at this cursor. `live`: it is the change being
+  // made, so it types in as the step plays.
   const shown = React.useMemo((): {
     diff?: Diffable;
     content: string | null;
-    progress: number;
+    live: boolean;
     counts?: { added: number; removed: number };
     hideRemoved?: boolean;
     focus?: readonly [number, number];
   } => {
-    if (!path || !inReplay) return { content: null, progress: 1 };
+    if (!path || !inReplay) return { content: null, live: false };
     const now = playback.contentAt(path, cursor);
     if (activeReference && activeReference.path === path)
-      return { content: now, progress: 1, focus: activeReference.displayed };
+      return { content: now, live: false, focus: activeReference.displayed };
     // An explanation about code shows the file as it stands, those lines lit.
     if (explained && explained.path === path) {
       const count = (now ?? "").split("\n").length;
       return {
         content: now,
-        progress: 1,
+        live: false,
         focus: explained.lines ?? [1, count],
       };
     }
-    // The file as it reads — but a change being made to it still plays, its
-    // new lines typed in place and marked, so playback is never a jump cut.
     const changeStep =
       lastChange === undefined ? undefined : playback.frames[lastChange]?.step;
-    const changeProgress =
-      changeStep && "sourceMode" in changeStep && changeStep.sourceMode === "included"
-        ? 1
-        : progress;
+    // Material included for completeness arrives whole, not typed.
+    const typed = !(
+      changeStep &&
+      "sourceMode" in changeStep &&
+      changeStep.sourceMode === "included"
+    );
+    // The file as it reads — but a change being made to it still plays, its
+    // new lines typed in place and marked, so playback is never a jump cut.
     if (view === "file" && lastChange !== undefined && lastChange === cursor - 1) {
       const change = playback.frames[lastChange]!.change!;
       return {
         diff: change,
         content: now,
-        progress: changeProgress,
+        live: typed,
         counts: change,
         hideRemoved: true,
       };
@@ -400,14 +507,14 @@ export function Player({
         return {
           diff: change,
           content: now,
-          progress: lastChange === cursor - 1 ? changeProgress : 1,
+          live: typed && lastChange === cursor - 1,
           counts: change,
         };
       }
     }
     if (view === "base" && sinceBase)
-      return { ...sinceBase, content: now, progress: 1 };
-    return { content: now, progress: 1 };
+      return { ...sinceBase, content: now, live: false };
+    return { content: now, live: false };
   }, [
     path,
     inReplay,
@@ -415,7 +522,6 @@ export function Player({
     cursor,
     view,
     lastChange,
-    progress,
     sinceBase,
     explained,
     activeReference,
@@ -436,12 +542,14 @@ export function Player({
   const prevNote = noted.filter((index) => index + 1 < cursor).at(-1);
 
   // Scrubber over the visible steps; its cursor counts visible steps applied.
-  const position = visible.filter((index) => index < cursor).length;
+  const position = React.useMemo(
+    () => visible.filter((index) => index < cursor).length,
+    [visible, cursor],
+  );
   const scrubSteps = React.useMemo((): ScrubStep[] => {
     const checks = new Map(ledger.checks.map((check) => [check.index, check]));
     return visible.map((index) => {
-      const frame = playback.frames[index]!;
-      const { step } = frame;
+      const { step } = playback.frames[index]!;
       const check = checks.get(index);
       const tone: Tone | undefined = replay.notes[step.id]
         ? "note"
@@ -451,12 +559,16 @@ export function Player({
             : "fail"
           : step.kind === "prompt" && step.agent === "main"
             ? "prompt"
-            : step.kind === "commit"
+            : step.kind === "commit" || step.kind === "lesson"
               ? "commit"
               : undefined;
-      return { label: stepLabel(frame), ...(tone ? { tone } : {}) };
+      return tone ? { tone } : {};
     });
   }, [playback, visible, ledger, replay.notes]);
+  const scrubLabel = React.useCallback(
+    (at: number) => stepLabel(playback.frames[visible[at - 1]!]!),
+    [playback, visible],
+  );
 
   const cycleView = React.useCallback(() => {
     const at = VIEWS.findIndex((v) => v.value === view);
@@ -548,16 +660,15 @@ export function Player({
 
   const short = (sha?: string) => sha?.slice(0, 7);
 
-  // Blame for the file on screen, once the step on it has settled.
-  const settled = shown.progress >= 1;
+  // Blame for the file on screen; the code pane shows it once the step settles.
   const origins = React.useMemo((): Origin[] | undefined => {
-    if (!path || !inReplay || !settled) return undefined;
+    if (!path || !inReplay) return undefined;
     return playback.blameAt(path, cursor).map((index) => {
       if (index < 0) return "base";
       if (index === cursor - 1) return "current";
       return playback.frames[index]!.step.kind === "external" ? "outside" : "agent";
     });
-  }, [path, inReplay, settled, playback, cursor]);
+  }, [path, inReplay, playback, cursor]);
 
   const blameOf = React.useCallback(
     (line: number): Blame | undefined => {
@@ -583,12 +694,17 @@ export function Player({
     [jump, forward],
   );
 
-  // How far along a history is: how much of the end state exists yet.
-  const coverage = React.useMemo(
-    () =>
-      replay.source === "git" || isCourse ? playback.coverageAt(cursor) : undefined,
-    [replay.source, isCourse, playback, cursor],
+  // How far along a history is: how much of the end state exists yet. The
+  // first answer reads every file's blame, so it waits for the first paint.
+  const measured = useAfterPaint(
+    replay.source === "git" || isCourse ? playback : undefined,
+    coverageReady,
   );
+  const coverage = React.useMemo(
+    () => (measured ? playback.coverageAt(cursor) : undefined),
+    [measured, playback, cursor],
+  );
+  const totals = useAfterPaint(playback, totalsOf);
 
   const tree = repoFiles.tree;
   const repoState =
@@ -598,9 +714,21 @@ export function Player({
         ? { failed: tree.message }
         : undefined;
 
+  const lessons = React.useMemo(
+    () => (isCourse ? lessonsOf(playback.frames) : []),
+    [isCourse, playback],
+  );
+
   let body: React.ReactNode;
   if (!path) {
-    body = <Message>No files changed.</Message>;
+    body = isCourse ? (
+      <Message>
+        The code arrives as the lesson goes on. Read alongside, or press{" "}
+        <kbd className="font-sans font-medium">Space</kbd> to play.
+      </Message>
+    ) : (
+      <Message>No files changed.</Message>
+    );
   } else if (entry?.omitted) {
     body = (
       <Message>
@@ -633,7 +761,10 @@ export function Player({
         <Message>Deleted at this point.</Message>
       ) : created ? (
         <Message>
-          Not written yet — step {created.index + 1} creates it.{" "}
+          {isCourse ? `${path.split("/").pop()} is written ` : "Not written yet — "}
+          {isCourse
+            ? `at step ${created.index + 1}. `
+            : `step ${created.index + 1} creates it. `}
           <button
             type="button"
             onClick={() => jumpBefore(created.index)}
@@ -647,12 +778,13 @@ export function Player({
       );
   } else {
     body = (
-      <CodeView
+      <LiveCode
         key={path}
+        store={transport.progress}
+        live={shown.live}
         path={path}
         diff={shown.diff}
         content={shown.content}
-        progress={shown.progress}
         origins={origins}
         blameOf={blameOf}
         onBlame={onBlame}
@@ -664,6 +796,10 @@ export function Player({
 
   const dir = path ? path.slice(0, path.lastIndexOf("/") + 1) : "";
   const name = path ? path.slice(path.lastIndexOf("/") + 1) : "";
+  // In a course the lesson panel is the narration: the caption would only
+  // say the same thing again above the code.
+  const narrated = isCourse && stepsOpen && side === "lesson";
+  const lessonDone = isCourse && reviewed;
 
   return (
     <SourceNavigationContext.Provider value={navigation}>
@@ -671,33 +807,56 @@ export function Player({
         className={`flex h-dvh flex-col overflow-hidden bg-surface-base text-text-high ${isCourse ? "study-player" : ""}`}
         data-study-pane={studyPane}
       >
-        <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line pr-2 pl-1.5">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line pr-2 pl-2">
           {onBack ? (
-            <Tool label={study ? "Course map" : "All replays"} onClick={onBack}>
-              <ArrowLeft />
-            </Tool>
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label={
+                study ? "Course map" : `Back to ${backLabel ?? "all replays"}`
+              }
+              title={
+                study
+                  ? "Back to the course map"
+                  : `Back to ${backLabel ?? "all replays"}`
+              }
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-control px-2 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-4"
+            >
+              <ArrowLeft aria-hidden />
+              <span className="hidden sm:inline">{backLabel ?? "Back"}</span>
+            </button>
           ) : (
             <span aria-hidden className="w-1" />
           )}
-          <div className="flex min-w-0 items-baseline gap-2.5">
+          <span aria-hidden className="h-5 w-px shrink-0 bg-line" />
+          <div className="flex min-w-0 flex-col justify-center leading-tight">
             <h1 className="min-w-0 truncate text-sm font-medium">{replay.title}</h1>
-            <p className="hidden shrink-0 text-xs text-text-low lg:block">
+            <p className="hidden min-w-0 truncate text-2xs text-text-low sm:block">
               {repo ?? replay.repo.name}
-              {replay.repo.base ? (
+              {replay.repo.base && !isCourse ? (
                 <span className="font-mono">
-                  {" "}
+                  {" · "}
                   {short(replay.repo.base)} → {short(replay.repo.end) ?? "…"}
                   {replay.repo.dirty ? "+" : ""}
                 </span>
               ) : null}
-              {` · ${agentName(replay.source)}`}
+              {isCourse
+                ? ` · ${lessons.filter((l) => l.frame).length} lessons`
+                : ` · ${agentName(replay.source)}`}
             </p>
           </div>
-          <span className="ml-auto hidden shrink-0 font-mono text-xs text-text-low tabular-nums md:inline">
-            <span className="text-success-ink">+{playback.totals.added}</span>{" "}
-            <span className="text-danger-ink">−{playback.totals.removed}</span>
-            {"  "}
-            {playback.totals.files} files
+          <span
+            className="ml-auto hidden shrink-0 font-mono text-xs text-text-low tabular-nums md:inline"
+            title="The net change, from the start to the end"
+          >
+            {totals ? (
+              <>
+                <span className="text-success-ink">+{totals.added}</span>{" "}
+                <span className="text-danger-ink">−{totals.removed}</span>
+                {"  "}
+                {totals.files} {totals.files === 1 ? "file" : "files"}
+              </>
+            ) : null}
           </span>
           {onSave ? (
             <Button size="sm" variant="ghost" onClick={onSave} loading={saving}>
@@ -712,7 +871,7 @@ export function Player({
               className="inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-3.5"
             >
               <Download aria-hidden />
-              Standalone HTML
+              Export
             </a>
           ) : null}
           <span className="flex items-center">
@@ -724,7 +883,11 @@ export function Player({
               <PanelLeft />
             </Tool>
             <Tool
-              label={stepsOpen ? "Hide steps ( ] )" : "Show steps ( ] )"}
+              label={
+                stepsOpen
+                  ? `Hide the ${isCourse ? "lesson" : "steps"} ( ] )`
+                  : `Show the ${isCourse ? "lesson" : "steps"} ( ] )`
+              }
               aria-pressed={stepsOpen}
               onClick={toggleSteps}
             >
@@ -768,6 +931,28 @@ export function Player({
         {notice ? (
           <p className="border-b border-line bg-emphasis-subtle px-4 py-1.5 text-xs text-text-mid">
             {notice}
+          </p>
+        ) : null}
+        {resumeNote && !notice ? (
+          <p className="flex items-center gap-3 border-b border-line bg-emphasis-subtle px-4 py-1.5 text-xs text-text-mid">
+            <span>
+              Picked up where you left off
+              {isCourse ? "" : ` — step ${position} of ${visible.length}`}.
+            </span>
+            <button
+              type="button"
+              onClick={() => jump(0)}
+              className="rounded-control font-medium text-text-high underline decoration-line-high underline-offset-2 focus-bar hover:decoration-text-mid"
+            >
+              Start from the beginning
+            </button>
+            <button
+              type="button"
+              onClick={() => setResumeDismissed(true)}
+              className="ml-auto rounded-control text-text-low focus-bar hover:text-text-high"
+            >
+              Dismiss
+            </button>
           </p>
         ) : null}
 
@@ -827,16 +1012,9 @@ export function Player({
                 onChange={setView}
                 className="ml-auto shrink-0"
               />
-              {shown.progress < 1 ? (
-                // How far the change on screen has played.
-                <span
-                  aria-hidden
-                  className="absolute bottom-0 left-0 h-0.5 bg-emphasis"
-                  style={{ width: `${shown.progress * 100}%` }}
-                />
-              ) : null}
+              <LiveBar store={transport.progress} live={shown.live} />
             </div>
-            <Caption replay={replay} frame={frame} cursor={cursor} onJump={jump} />
+            {narrated ? null : <Caption replay={replay} frame={frame} onJump={jump} />}
             <div className="min-h-0 flex-1">{body}</div>
           </main>
 
@@ -844,8 +1022,8 @@ export function Player({
             <ResizablePanel
               side="left"
               min={260}
-              max={640}
-              label="Resize the steps panel"
+              max={720}
+              label="Resize the side panel"
               {...stepsWidth}
               className="study-reading border-l border-line bg-surface-low"
             >
@@ -904,13 +1082,15 @@ export function Player({
                 </div>
                 <div key={side} className="min-h-0 flex-1 overflow-auto">
                   {side === "courses" && study ? (
-                    <CourseOutline study={study} reviewed={reviewed} />
+                    <CourseOutline study={study} reviewed={lessonDone} />
                   ) : side === "lesson" ? (
                     <LessonPanel
                       replay={replay}
                       frames={playback.frames}
                       cursor={cursor}
+                      furthest={furthest}
                       onJump={jump}
+                      study={study}
                       onInspect={(next) => {
                         const step = playback.frames[next - 1]?.step;
                         const path = step && "path" in step ? step.path : undefined;
@@ -938,6 +1118,9 @@ export function Player({
                       visible={visible}
                       cursor={cursor}
                       onJump={jump}
+                      {...(isCourse
+                        ? {}
+                        : { filter, onFilter: setFilter, notes: noted.length })}
                     />
                   ) : (
                     <EvidencePanel
@@ -995,86 +1178,42 @@ export function Player({
             <Scrubber
               steps={scrubSteps}
               cursor={position}
-              label="Session timeline"
-              baseLabel="Base commit"
+              label={isCourse ? "Lesson timeline" : "Session timeline"}
+              baseLabel={isCourse ? "Empty repository" : "Base commit"}
+              labelOf={scrubLabel}
               onJump={jumpToPosition}
             />
           </div>
-          <details className="study-progress-detail">
-            <summary
-              aria-label="Playback progress"
-              title="Playback and source coverage"
-            >
-              <span className="study-step-count">
-                {position}/{visible.length}
-              </span>
-              <span className="study-session-percent">
-                {percent(position, visible.length)}
-              </span>
-            </summary>
-            <div>
-              <p>
-                Step {position} of {visible.length}
-              </p>
-              {coverage && (
-                <p>
-                  Files {percent(coverage.files, coverage.totalFiles)} · Lines{" "}
-                  {percent(coverage.lines, coverage.totalLines)}
-                </p>
-              )}
-              {sourceCoverage && (
-                <p>
-                  Selected source: {sourceCoverage.explained} explained ·{" "}
-                  {sourceCoverage.included} included / {sourceCoverage.total} lines
-                </p>
-              )}
-              <p>Playback progress does not mark a lesson reviewed.</p>
-            </div>
-          </details>
-          {study && (
-            <CourseActions
+          <StepCount
+            position={position}
+            shown={visible.length}
+            all={total}
+            coverage={coverage}
+            source={sourceCoverage}
+            isCourse={isCourse}
+          />
+          {isCourse ? (
+            <LessonActions
               study={study}
-              reviewed={reviewed}
-              onReviewed={() => setReviewed(!reviewed)}
+              done={lessonDone}
+              onDone={() => setReviewed(!reviewed)}
             />
-          )}
-          {!isCourse && (
-            <>
-              <Select
-                value={filter}
-                onValueChange={(next) => isFilter(next) && setFilter(next)}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-32 shrink-0"
-                  aria-label="Steps shown"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="changes">Changes</SelectItem>
-                  <SelectItem value="all">Every step</SelectItem>
-                  {noted.length ? (
-                    <SelectItem value="notes">Notes ({noted.length})</SelectItem>
-                  ) : null}
-                </SelectContent>
-              </Select>
-              <Select
-                value={String(transport.speed)}
-                onValueChange={(next) => setSpeed(Number(next) as Speed)}
-              >
-                <SelectTrigger size="sm" className="w-20 shrink-0" aria-label="Speed">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SPEEDS.map((speed) => (
-                    <SelectItem key={speed} value={String(speed)}>
-                      {speed}×
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </>
+          ) : (
+            <Select
+              value={String(transport.speed)}
+              onValueChange={(next) => setSpeed(Number(next) as Speed)}
+            >
+              <SelectTrigger size="sm" className="w-20 shrink-0" aria-label="Speed">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SPEEDS.map((speed) => (
+                  <SelectItem key={speed} value={String(speed)}>
+                    {speed}×
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
         </footer>
       </div>
@@ -1082,6 +1221,72 @@ export function Player({
   );
 }
 
+/**
+ * Where the replay is, in one number that means the same everywhere: the
+ * step among those shown. The detail says what else is known — how much of
+ * a course's repository exists yet.
+ */
+function StepCount({
+  position,
+  shown,
+  all,
+  coverage,
+  source,
+  isCourse,
+}: {
+  position: number;
+  shown: number;
+  all: number;
+  coverage?: ReturnType<Playback["coverageAt"]>;
+  source?: { explained: number; included: number; total: number };
+  isCourse: boolean;
+}) {
+  return (
+    <details className="study-progress-detail">
+      <summary
+        aria-label="Playback progress"
+        title={
+          shown === all
+            ? `Step ${position} of ${all}`
+            : `Step ${position} of ${shown} shown (${all} in all)`
+        }
+        className={cn("text-xs tabular-nums", !isCourse && "cursor-default")}
+      >
+        <span className="study-step-count">
+          {position} / {shown}
+        </span>
+        {isCourse ? (
+          <span className="study-session-percent">{percent(position, shown)}</span>
+        ) : null}
+      </summary>
+      <div>
+        <p>
+          Step {position} of {shown}
+          {shown === all ? "" : ` shown — ${all} in all`}
+        </p>
+        {coverage && (
+          <p>
+            Files {percent(coverage.files, coverage.totalFiles)} · Lines{" "}
+            {percent(coverage.lines, coverage.totalLines)} of the repository exist
+          </p>
+        )}
+        {source && (
+          <p>
+            Selected source: {source.explained} explained · {source.included} included /{" "}
+            {source.total} lines
+          </p>
+        )}
+        {isCourse ? (
+          <p className="flex items-center gap-1.5">
+            <Check aria-hidden className="size-3.5 text-success-ink" />A lesson is done
+            once you reach its end; you can also mark it by hand.
+          </p>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 function Message({ children }: { children: React.ReactNode }) {
-  return <p className="p-6 text-sm text-text-mid">{children}</p>;
+  return <p className="max-w-prose p-6 text-sm text-text-mid">{children}</p>;
 }

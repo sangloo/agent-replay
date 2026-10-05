@@ -1,6 +1,9 @@
 import { curriculumLessons, studyHref, type StudyContext } from "@agent-replay/core";
-import { ArrowLeft, ArrowRight, Check } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ChevronRight } from "lucide-react";
 import * as React from "react";
+
+import { cn } from "@/ui";
+
 import { courseProgress } from "./study-progress";
 
 /** The outline lives inside the reading panel, never above the code. */
@@ -24,20 +27,44 @@ export function CourseOutline({
   const progress = courseProgress(study.curriculum.id, study.curriculum.revision);
   const libraryHref = study.key ? `#/learn/${study.key}` : study.curriculum.libraryFile;
   return (
-    <section className="study-outline" aria-label="Course outline">
-      <div className="study-outline-heading">
-        <h2>{study.curriculum.title}</h2>
-        {libraryHref && <a href={libraryHref}>Full course map →</a>}
+    <section className="flex flex-col gap-3 p-4 text-sm" aria-label="Course outline">
+      <div className="flex flex-col gap-1">
+        <h2 className="font-medium text-text-high">{study.curriculum.title}</h2>
+        {libraryHref && (
+          <a
+            href={libraryHref}
+            className="self-start rounded-control text-xs text-text-low underline decoration-line-high underline-offset-2 focus-bar hover:text-text-high"
+          >
+            Full course map →
+          </a>
+        )}
       </div>
-      <nav aria-label="Lesson outline">
+      <nav aria-label="Lesson outline" className="flex flex-col">
         {study.curriculum.chapters.map((c, i) => (
-          <details key={c.id} open={c.id === chapter.id}>
-            <summary>
-              <span>{String(i + 1).padStart(2, "0")}</span>
-              {c.title}
-              <small>{c.lessons.length}</small>
+          <details
+            key={c.id}
+            open={c.id === chapter.id}
+            className="group border-t border-line"
+          >
+            <summary className="flex cursor-pointer list-none items-baseline gap-2 py-2.5 font-medium text-text-high [&::-webkit-details-marker]:hidden">
+              <ChevronRight
+                aria-hidden
+                className="size-3.5 shrink-0 self-center text-text-low transition-transform duration-fast group-open:rotate-90"
+              />
+              <span className="text-2xs text-text-low tabular-nums">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <span className="min-w-0 flex-1">{c.title}</span>
+              <small className="text-2xs font-normal text-text-low tabular-nums">
+                {
+                  c.lessons.filter((l) =>
+                    l.id === lesson.id ? reviewed : progress[l.id]?.reviewed,
+                  ).length
+                }
+                /{c.lessons.length}
+              </small>
             </summary>
-            <ol>
+            <ol className="flex flex-col pb-2">
               {c.lessons.map((l) => {
                 const current = l.id === lesson.id;
                 const done = current ? reviewed : progress[l.id]?.reviewed;
@@ -49,16 +76,30 @@ export function CourseOutline({
                         ref={current ? activeLink : undefined}
                         href={href}
                         aria-current={current ? "step" : undefined}
+                        className={cn(
+                          "flex items-baseline gap-2 rounded-control px-2 py-1.5 text-[13px] focus-bar",
+                          current
+                            ? "bg-emphasis-subtle text-text-high"
+                            : "text-text-mid hover:bg-hover hover:text-text-high",
+                        )}
                       >
-                        <span className="study-outline-number">{l.id}</span>
-                        <span>{l.title}</span>
+                        <span className="w-6 shrink-0 text-2xs text-text-low tabular-nums">
+                          {l.id}
+                        </span>
+                        <span className="min-w-0 flex-1">{l.title}</span>
                         {done && (
-                          <Check className="study-done-icon" aria-label="Reviewed" />
+                          <Check
+                            className="size-3.5 shrink-0 self-center text-success-ink"
+                            aria-label="Done"
+                          />
                         )}
                       </a>
                     ) : (
-                      <span className="study-unavailable">
-                        {l.id}. {l.title} (unavailable)
+                      <span className="flex items-baseline gap-2 px-2 py-1.5 text-[13px] text-text-low">
+                        <span className="w-6 shrink-0 text-2xs tabular-nums">
+                          {l.id}
+                        </span>
+                        {l.title} (unavailable)
                       </span>
                     )}
                   </li>
@@ -69,14 +110,18 @@ export function CourseOutline({
         ))}
       </nav>
       {lesson.prerequisites.length > 0 && (
-        <p className="study-prerequisites">
+        <p className="text-xs text-text-low">
           Before this lesson:{" "}
           {lesson.prerequisites.map((id, i) => {
             const prerequisite = all.find((l) => l.id === id)!;
             return (
               <React.Fragment key={id}>
                 {i ? " · " : ""}
-                <a href={studyHref(study, prerequisite)} title={prerequisite.title}>
+                <a
+                  href={studyHref(study, prerequisite)}
+                  title={prerequisite.title}
+                  className="underline underline-offset-2"
+                >
                   {id}
                 </a>
               </React.Fragment>
@@ -88,48 +133,66 @@ export function CourseOutline({
   );
 }
 
-/** Small, persistent lesson actions beside the playback controls. */
-export function CourseActions({
+/**
+ * Beside the playback controls: whether the lesson is done — it becomes so
+ * when its end is reached, and can be set either way by hand — and, in a
+ * curriculum, the lessons either side.
+ */
+export function LessonActions({
   study,
-  reviewed,
-  onReviewed,
+  done,
+  onDone,
 }: {
-  study: StudyContext;
-  reviewed: boolean;
-  onReviewed: () => void;
+  study?: StudyContext;
+  done: boolean;
+  onDone: () => void;
 }) {
-  const all = curriculumLessons(study.curriculum);
-  const index = all.findIndex((l) => l.id === study.lessonId);
-  if (index < 0) return null;
-  const previous = all[index - 1],
-    next = all[index + 1];
+  const all = study ? curriculumLessons(study.curriculum) : [];
+  const index = all.findIndex((l) => l.id === study?.lessonId);
+  const previous = index > 0 ? all[index - 1] : undefined;
+  const next = index >= 0 ? all[index + 1] : undefined;
+  const previousHref = study && previous ? studyHref(study, previous) : undefined;
+  const nextHref = study && next ? studyHref(study, next) : undefined;
   return (
-    <nav className="study-actions" aria-label="Lesson controls">
+    <nav
+      className="study-actions flex shrink-0 items-center gap-1"
+      aria-label="Lesson controls"
+    >
       <button
-        className="study-reviewed"
+        className={cn(
+          "study-reviewed inline-flex h-7 items-center gap-1.5 rounded-control border px-2.5 text-xs font-medium whitespace-nowrap focus-bar [&_svg]:size-3.5",
+          done
+            ? "border-success-line bg-success-subtle text-success-ink"
+            : "border-line-control text-text-mid hover:bg-hover hover:text-text-high",
+        )}
         type="button"
-        aria-label={reviewed ? "Reviewed" : "Mark reviewed"}
-        aria-pressed={reviewed}
-        onClick={onReviewed}
-        title={reviewed ? "Reviewed — click to undo" : "Mark this lesson reviewed"}
+        aria-label={done ? "Done" : "Mark as done"}
+        aria-pressed={done}
+        onClick={onDone}
+        title={done ? "Done — click to mark as not done" : "Mark this lesson as done"}
       >
         <Check aria-hidden />
-        <span>{reviewed ? "Reviewed" : "Review"}</span>
+        <span>{done ? "Done" : "Mark as done"}</span>
       </button>
-      {previous && studyHref(study, previous) && (
+      {previousHref && previous && (
         <a
-          className="study-previous"
-          href={studyHref(study, previous)}
+          className="study-previous inline-flex size-7 items-center justify-center rounded-control text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-4"
+          href={previousHref}
           aria-label="Previous lesson"
           title={previous.title}
         >
           <ArrowLeft aria-hidden />
         </a>
       )}
-      {next && studyHref(study, next) && (
+      {nextHref && next && (
         <a
-          className="study-next"
-          href={studyHref(study, next)}
+          className={cn(
+            "study-next inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium whitespace-nowrap focus-bar [&_svg]:size-3.5",
+            done
+              ? "bg-emphasis text-accent-text hover:opacity-90"
+              : "text-text-mid hover:bg-hover hover:text-text-high",
+          )}
+          href={nextHref}
           aria-label="Next lesson"
           title={next.title}
         >

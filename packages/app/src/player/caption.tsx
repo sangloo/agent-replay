@@ -12,8 +12,6 @@ export interface CaptionProps {
   replay: Replay;
   /** The step just applied; undefined at the base commit. */
   frame?: Frame;
-  /** Steps applied — for "step 12 of 340". */
-  cursor: number;
   onJump: (cursor: number) => void;
 }
 
@@ -25,7 +23,6 @@ export interface CaptionProps {
 export const Caption = React.memo(function Caption({
   replay,
   frame,
-  cursor,
   onJump,
 }: CaptionProps) {
   if (!frame) {
@@ -49,10 +46,6 @@ export const Caption = React.memo(function Caption({
   const { step } = frame;
   const meta = (
     <>
-      <span className="tabular-nums">
-        {cursor} / {replay.steps.length}
-      </span>
-      <span aria-hidden>·</span>
       <span className="font-mono">{when(step.at, replay)}</span>
       {step.agent !== "main" ? (
         <>

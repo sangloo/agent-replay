@@ -1,10 +1,24 @@
-import type { Frame, Replay } from "@agent-replay/core";
-import { BookOpen, ChevronRight, FilePlus2, FlaskConical } from "lucide-react";
+import {
+  curriculumLessons,
+  studyHref,
+  type Frame,
+  type Replay,
+  type StudyContext,
+} from "@agent-replay/core";
+import {
+  BookOpen,
+  Check,
+  ChevronRight,
+  CircleCheck,
+  FilePlus2,
+  FlaskConical,
+} from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/ui";
 
 import { fileName } from "../labels";
+import { lessonsOf, type Lesson } from "./lessons";
 import { Markdown } from "./markdown";
 
 export interface LessonPanelProps {
@@ -12,32 +26,12 @@ export interface LessonPanelProps {
   frames: readonly Frame[];
   /** Steps applied; the current step is `cursor - 1`. */
   cursor: number;
+  /** The furthest step the reader has reached, ever: what marks a lesson read. */
+  furthest?: number;
   onJump: (cursor: number) => void;
   onInspect?: (cursor: number) => void;
-}
-
-interface Lesson {
-  frame?: Frame;
-  number: number;
-  frames: Frame[];
-}
-
-/** The steps of a course, by lesson. Steps before the first lesson are its preface. */
-function lessonsOf(frames: readonly Frame[]): Lesson[] {
-  const lessons: Lesson[] = [];
-  let current: Lesson = { number: 0, frames: [] };
-  for (const frame of frames) {
-    if (frame.step.kind === "lesson") {
-      if (current.frame || current.frames.length) lessons.push(current);
-      current = { frame, number: 0, frames: [] };
-      continue;
-    }
-    current.frames.push(frame);
-  }
-  if (current.frame || current.frames.length) lessons.push(current);
-  // The preface (steps before the first lesson) is not a numbered lesson.
-  let number = 0;
-  return lessons.map((lesson) => ({ ...lesson, number: lesson.frame ? ++number : 0 }));
+  /** Its place in a curriculum, for the way on once it is finished. */
+  study?: StudyContext;
 }
 
 /** What a code step did, in words a learner reads between explanations. */
@@ -65,10 +59,18 @@ export const LessonPanel = React.memo(function LessonPanel({
   replay,
   frames,
   cursor,
+  furthest = cursor,
   onJump,
   onInspect = onJump,
+  study,
 }: LessonPanelProps) {
   const lessons = React.useMemo(() => lessonsOf(frames), [frames]);
+  // A lesson is read once the reader has been past its last step.
+  const read = (lesson: Lesson) => {
+    const last = lesson.frames.at(-1)?.index ?? lesson.frame?.index ?? 0;
+    return furthest >= last + 1;
+  };
+  const finished = frames.length > 0 && cursor >= frames.length;
   const currentIndex = cursor - 1;
   const at = Math.max(
     0,
@@ -78,6 +80,7 @@ export const LessonPanel = React.memo(function LessonPanel({
   );
   const lesson = lessons[at];
   const counted = lessons.filter((item) => item.frame).length;
+  const readCount = lessons.filter((item) => item.frame && read(item)).length;
   const [contents, setContents] = React.useState(false);
 
   const latest = React.useRef<HTMLDivElement>(null);
@@ -121,6 +124,9 @@ export const LessonPanel = React.memo(function LessonPanel({
           {lesson.number
             ? `Lesson ${lesson.number} of ${counted}`
             : `Introduction · ${counted} lessons`}
+          {counted ? (
+            <span className="ml-1 text-text-low tabular-nums">· {readCount} read</span>
+          ) : null}
           <ChevronRight
             aria-hidden
             className={cn(
@@ -150,7 +156,15 @@ export const LessonPanel = React.memo(function LessonPanel({
                     <span className="w-5 shrink-0 text-right text-xs text-text-low tabular-nums">
                       {item.number || ""}
                     </span>
-                    {step?.kind === "lesson" ? step.title : "Introduction"}
+                    <span className="min-w-0 flex-1">
+                      {step?.kind === "lesson" ? step.title : "Introduction"}
+                    </span>
+                    {item.frame && read(item) ? (
+                      <Check
+                        aria-label="Read"
+                        className="size-3.5 shrink-0 self-center text-success-ink"
+                      />
+                    ) : null}
                   </button>
                 </li>
               );
@@ -301,6 +315,8 @@ export const LessonPanel = React.memo(function LessonPanel({
           );
         })}
 
+        {finished ? <Finished study={study} replay={replay} /> : null}
+
         {lessons[at + 1] && shown.length === lesson.frames.length ? (
           <button
             type="button"
@@ -318,3 +334,32 @@ export const LessonPanel = React.memo(function LessonPanel({
     </div>
   );
 });
+
+/** The end of the course: said plainly, with the way on. */
+function Finished({ study, replay }: { study?: StudyContext; replay: Replay }) {
+  const all = study ? curriculumLessons(study.curriculum) : [];
+  const index = all.findIndex((lesson) => lesson.id === study?.lessonId);
+  const next = index >= 0 ? all[index + 1] : undefined;
+  const href = study && next ? studyHref(study, next) : undefined;
+  return (
+    <div className="mt-2 flex flex-col gap-2 rounded-panel border border-success-line bg-success-subtle p-4">
+      <p className="flex items-center gap-2 text-sm font-medium text-success-ink">
+        <CircleCheck aria-hidden className="size-4" />
+        {study ? "Lesson complete" : `You have finished “${replay.title}”`}
+      </p>
+      <p className="text-xs text-text-mid">
+        Your progress is saved in this browser
+        {href ? "." : " — the Learn page shows where you are in every course."}
+      </p>
+      {href && next ? (
+        <a
+          href={href}
+          className="flex items-center gap-1.5 self-start rounded-control text-sm font-medium text-text-high underline decoration-line-high underline-offset-2 focus-bar hover:decoration-text-mid"
+        >
+          Next: {next.title}
+          <ChevronRight aria-hidden className="size-4" />
+        </a>
+      ) : null}
+    </div>
+  );
+}

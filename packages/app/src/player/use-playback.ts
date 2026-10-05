@@ -233,7 +233,44 @@ export class Engine {
   }
 }
 
-export interface Transport extends Snapshot {
+/**
+ * How far the step on screen has played, 0–1, as a value to subscribe to.
+ * It changes on every animation frame while a change types itself in, so
+ * only what draws the typing reads it — the code pane and its progress bar
+ * — and the rest of the player renders once per step, not sixty times a
+ * second.
+ */
+export interface ProgressStore {
+  get: () => number;
+  subscribe: (listener: () => void) => () => void;
+}
+
+function progressStore(
+  initial: number,
+): ProgressStore & { set: (value: number) => void } {
+  let value = initial;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next) => {
+      if (next === value) return;
+      value = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+/** The progress of the step on screen, re-rendering the caller as it plays. */
+export function useProgress(store: ProgressStore): number {
+  return React.useSyncExternalStore(store.subscribe, store.get, store.get);
+}
+
+export interface Transport extends Omit<Snapshot, "progress"> {
+  progress: ProgressStore;
   jump: (cursor: number) => void;
   forward: () => void;
   back: () => void;
@@ -241,25 +278,49 @@ export interface Transport extends Snapshot {
   setSpeed: (speed: Speed) => void;
 }
 
+type Coarse = Omit<Snapshot, "progress">;
+
 export function usePlayback(
   frames: readonly Frame[],
   visible: readonly number[],
   /** The cursor to open on. */
   initial = 0,
 ): Transport {
-  const [snapshot, setSnapshot] = React.useState<Snapshot>({
-    cursor: Math.max(0, Math.min(frames.length, initial)),
-    progress: 1,
+  const start = Math.max(0, Math.min(frames.length, initial));
+  const [coarse, setCoarse] = React.useState<Coarse>({
+    cursor: start,
     mode: "paused",
     playing: false,
     speed: 1,
   });
-  const [engine] = React.useState(() => new Engine(frames, setSnapshot, initial));
+  const [store] = React.useState(() => progressStore(1));
+  const [engine] = React.useState(
+    () =>
+      new Engine(
+        frames,
+        (snapshot) => {
+          store.set(snapshot.progress);
+          setCoarse((last) =>
+            last.cursor === snapshot.cursor &&
+            last.mode === snapshot.mode &&
+            last.speed === snapshot.speed
+              ? last
+              : {
+                  cursor: snapshot.cursor,
+                  mode: snapshot.mode,
+                  playing: snapshot.playing,
+                  speed: snapshot.speed,
+                },
+          );
+        },
+        initial,
+      ),
+  );
   React.useEffect(() => engine.setVisible(visible), [engine, visible]);
   React.useEffect(() => () => engine.destroy(), [engine]);
 
   // The actions keep their identity for the engine's life, so components
-  // handed one do not re-render on every frame of typing.
+  // handed one do not re-render when the transport does.
   const actions = React.useMemo(
     () => ({
       jump: (cursor: number) => engine.jump(cursor),
@@ -270,5 +331,8 @@ export function usePlayback(
     }),
     [engine],
   );
-  return React.useMemo(() => ({ ...snapshot, ...actions }), [snapshot, actions]);
+  return React.useMemo(
+    () => ({ ...coarse, progress: store, ...actions }),
+    [coarse, store, actions],
+  );
 }
