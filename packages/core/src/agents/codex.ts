@@ -116,6 +116,7 @@ export function parseCodex(jsonl: Log, agent = "main"): Transcript {
   const transcript: Transcript = { source: CODEX, events: [] };
   const slots: (TranscriptEvent | Call)[] = [];
   const outputs = new Map<string, unknown>();
+  const pending = new Set<string>();
   const patched = new Map<string, boolean>();
   const typed: TranscriptEvent[] = [];
   const injected: TranscriptEvent[] = [];
@@ -195,6 +196,7 @@ export function parseCodex(jsonl: Log, agent = "main"): Transcript {
             : command.includes("*** Begin Patch")
               ? extractPatch(command)
               : undefined;
+        pending.add(id);
         slots.push({
           at,
           id,
@@ -213,6 +215,7 @@ export function parseCodex(jsonl: Log, agent = "main"): Transcript {
         const command = commandText(action.command);
         if (!id || !command) break;
         const dir = str(action.working_directory) ?? cwd;
+        pending.add(id);
         slots.push({
           at,
           id,
@@ -227,8 +230,13 @@ export function parseCodex(jsonl: Log, agent = "main"): Transcript {
       case "custom_tool_call": {
         const id = str(payload.call_id);
         const input = str(payload.input);
-        if (!id || !input || !/apply_?patch/.test(str(payload.name) ?? "")) break;
+        if (!id || !input) break;
+        if (!/apply_?patch/.test(str(payload.name) ?? "")) {
+          transcript.unsupportedTools = (transcript.unsupportedTools ?? 0) + 1;
+          break;
+        }
         const dir = cwd;
+        pending.add(id);
         slots.push({
           at,
           id,
@@ -248,7 +256,7 @@ export function parseCodex(jsonl: Log, agent = "main"): Transcript {
       case "custom_tool_call_output":
       case "local_shell_call_output": {
         const id = str(payload.call_id);
-        if (id) outputs.set(id, payload.output);
+        if (id && pending.has(id)) outputs.set(id, payload.output);
         break;
       }
     }

@@ -322,3 +322,33 @@ describe("claude-code", () => {
     ).toBeUndefined();
   });
 });
+
+it("reports unsupported orchestrator calls without retaining their output as replay actions", () => {
+  const lines = [
+    CODEX_LOG[0],
+    {
+      type: "response_item",
+      payload: {
+        type: "custom_tool_call",
+        name: "exec",
+        call_id: "wrapped",
+        input: "await tools.exec_command({cmd:'pwd'})",
+      },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "custom_tool_call_output",
+        call_id: "wrapped",
+        output: "large unknown output",
+      },
+    },
+  ].map((line) => JSON.stringify(line));
+  const transcript = parseTranscript({
+    *[Symbol.iterator]() {
+      yield* lines;
+    },
+  });
+  expect(transcript.unsupportedTools).toBe(1);
+  expect(transcript.events).toEqual([]);
+});

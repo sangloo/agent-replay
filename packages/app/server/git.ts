@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, openSync, closeSync, fstatSync, readSync } from "node:fs";
 import { join } from "node:path";
 
 import { REPLAY_DIR, type Commit } from "@agent-replay/core";
@@ -94,11 +94,31 @@ export function showFile(root: string, rev: string, path: string): string | null
 }
 
 /** A file in the working tree; `null` when it does not exist. */
-export function readWorking(root: string, path: string): string | null {
+export function readWorking(
+  root: string,
+  path: string,
+  maxBytes?: number,
+): string | null {
+  let fd: number | undefined;
   try {
-    return decode(readFileSync(join(root, path)));
+    if (maxBytes === undefined) return decode(readFileSync(join(root, path)));
+    fd = openSync(join(root, path), "r");
+    const size = fstatSync(fd).size;
+    if (size > maxBytes) return "\0binary"; // capture's existing omitted-body marker
+    const buffer = Buffer.allocUnsafe(size + 1);
+    let used = 0;
+    while (used < buffer.length) {
+      const read = readSync(fd, buffer, used, buffer.length - used, null);
+      if (!read) break;
+      used += read;
+    }
+    // A concurrently growing file is omitted rather than returned truncated.
+    if (used > size) return "\0binary";
+    return decode(buffer.subarray(0, used));
   } catch {
     return null;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -266,9 +286,15 @@ export function filesAt(root: string, rev: string): string[] {
 /** Which of `paths` git ignores — secrets like `.env.local` live there. */
 export function ignored(root: string, paths: readonly string[]): Set<string> {
   if (paths.length === 0) return new Set();
+  // check-ignore excludes tracked files by definition. Remove them in bulk
+  // rather than making it consult the index independently for thousands of paths.
+  const indexed = git(root, ["ls-files", "--cached", "-z"]);
+  const tracked = new Set(indexed?.toString("utf8").split("\u0000") ?? []);
+  const candidates = paths.filter((path) => !tracked.has(path));
+  if (!candidates.length) return new Set();
   try {
     const out = execFileSync("git", ["-C", root, "check-ignore", "--stdin", "-z"], {
-      input: paths.join("\u0000"),
+      input: candidates.join("\u0000"),
       maxBuffer: 64 * 1024 * 1024,
       stdio: ["pipe", "pipe", "ignore"],
     });
@@ -327,9 +353,12 @@ export function mergedIn(
   for (const range of arrivals(log).filter(within)) {
     for (const path of names(...range)) arrived.add(path);
   }
+  if (arrived.size === 0) return arrived;
   const own = new Set<string>();
+  const inspected = new Set<string>();
   for (const { sha, subject } of log) {
-    if (!/^commit( \(amend\))?:/.test(subject)) continue;
+    if (!/^commit( \(amend\))?:/.test(subject) || inspected.has(sha)) continue;
+    inspected.add(sha);
     const range: [string, string] = [`${sha}^1`, sha];
     if (!within(range)) continue;
     for (const path of names(...range)) own.add(path);
@@ -384,4 +413,35 @@ function arrivals(log: readonly ReflogEntry[]): [string, string][] {
     }
   });
   return ranges;
+}
+
+/** Resolve a revision's tree once instead of traversing it once per missing path. */
+export function readFilesAt(
+  root: string,
+  rev: string,
+  paths: readonly string[],
+): Map<string, string | null> {
+  const listing = git(root, ["ls-tree", "-r", "-z", rev]);
+  if (!listing)
+    return readBlobs(
+      root,
+      paths.map((path) => `${rev}:${path}`),
+    );
+  const wanted = new Set(paths),
+    objects = new Map<string, string>();
+  for (const entry of listing.toString("utf8").split("\0")) {
+    const tab = entry.indexOf("\t");
+    if (tab < 0) continue;
+    const path = entry.slice(tab + 1);
+    if (!wanted.has(path)) continue;
+    const [, type, sha] = entry.slice(0, tab).split(" ");
+    if (type === "blob" && sha) objects.set(path, sha);
+  }
+  const blobs = readBlobs(root, [...objects.values()]);
+  return new Map(
+    paths.map((path) => [
+      `${rev}:${path}`,
+      objects.has(path) ? (blobs.get(objects.get(path)!) ?? null) : null,
+    ]),
+  );
 }

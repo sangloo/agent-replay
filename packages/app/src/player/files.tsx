@@ -222,8 +222,11 @@ const FileTree = React.memo(function FileTree({
       const mark = markOf(file);
       if (!mark) continue;
       out.set(FILE_ID + file.path, mark);
-      for (const id of ancestorIds(file.path))
-        under.set(id, [...(under.get(id) ?? []), mark]);
+      for (const id of ancestorIds(file.path)) {
+        const list = under.get(id);
+        if (list) list.push(mark);
+        else under.set(id, [mark]);
+      }
     }
     for (const [id, list] of under) out.set(id, rollUp(list));
     return out;

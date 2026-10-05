@@ -239,7 +239,30 @@ export function CodeView({
   const lit = focus ? lines.findIndex(focused) : -1;
   const anchor =
     target >= 0 ? target : lit >= 0 ? lit : lines.findIndex((line) => line.hot);
-  const anchorRef = React.useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = React.useState({ top: 0, height: 660, row: 22 });
+  React.useLayoutEffect(() => {
+    const box = scroller.current;
+    if (!box) return;
+    const measure = () =>
+      setViewport({
+        top: box.scrollTop,
+        height: box.clientHeight || 660,
+        row: parseFloat(getComputedStyle(box).lineHeight) || 22,
+      });
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(box);
+    return () => observer?.disconnect();
+  }, []);
+  const start = Math.min(
+    Math.max(0, lines.length - Math.ceil(viewport.height / viewport.row) - 24),
+    Math.max(0, Math.floor((viewport.top - 16) / viewport.row) - 12),
+  );
+  const end = Math.min(
+    lines.length,
+    Math.ceil((viewport.top + viewport.height) / viewport.row) + 12,
+  );
 
   // Keep the typing point — or, before it, the start of the change — in the
   // upper middle of the view. A new file opens there at once; within a file
@@ -247,10 +270,9 @@ export function CodeView({
   // when the distance is more than a screen or motion is reduced.
   const opened = React.useRef(false);
   React.useLayoutEffect(() => {
-    const row = anchorRef.current;
     const box = scroller.current;
-    if (!row || !box) return;
-    const top = row.offsetTop;
+    if (anchor < 0 || !box) return;
+    const top = 16 + anchor * viewport.row;
     const height = box.clientHeight;
     const inView =
       top >= box.scrollTop + height * 0.12 && top <= box.scrollTop + height * 0.72;
@@ -263,7 +285,7 @@ export function CodeView({
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     opened.current = true;
     box.scrollTo({ top: goal, behavior: still ? "instant" : "smooth" });
-  }, [anchor, lines]);
+  }, [anchor, viewport.row]);
 
   // The hovered line says who wrote it, inline and dim at its end.
   const [hover, setHover] = React.useState<number>();
@@ -280,22 +302,30 @@ export function CodeView({
   return (
     <div
       ref={scroller}
+      onScroll={(event) => {
+        const top = event.currentTarget.scrollTop;
+        setViewport((value) => ({ ...value, top }));
+      }}
       onMouseMove={onMove}
       onMouseLeave={() => setHover(undefined)}
       className="relative h-full overflow-auto py-4 font-mono text-code text-text-high"
     >
-      {lines.map((line, i) => (
+      <div aria-hidden style={{ height: start * viewport.row }} />
+      {lines.slice(start, end).map((line, offset) => (
         <CodeLine
-          key={i}
+          key={start + offset}
           line={line}
           origin={line.number === null ? undefined : origins?.[line.number - 1]}
           sources={sources}
-          lineRef={i === anchor ? anchorRef : undefined}
           lit={focused(line)}
           blame={line.number !== null && line.number - 1 === hover ? blame : undefined}
           onBlame={onBlame}
         />
       ))}
+      <div
+        aria-hidden
+        style={{ height: Math.max(0, lines.length - end) * viewport.row }}
+      />
     </div>
   );
 }

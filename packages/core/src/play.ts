@@ -77,7 +77,7 @@ interface Version {
   content: string | null;
 }
 
-export function play(replay: Replay): Playback {
+function* prepare(replay: Replay): Generator<number, Playback> {
   const versions = new Map<string, Version[]>();
   const current = new Map<string, string | null>();
   for (const [path, content] of Object.entries(replay.files)) {
@@ -85,30 +85,46 @@ export function play(replay: Replay): Playback {
     current.set(path, content);
   }
 
-  const frames: Frame[] = replay.steps.map((step, index) => {
-    if (!isChange(step)) return { index, step };
+  const frames: Frame[] = [];
+  for (const [index, step] of replay.steps.entries()) {
+    if (!isChange(step)) {
+      frames.push({ index, step });
+      yield index + 1;
+      continue;
+    }
     const before = current.get(step.path) ?? null;
     const next = applyStep(before, step);
     const applied = next !== undefined;
     const after = applied ? next : before;
-    const hunks = applied ? stepHunks(before, step) : [];
+    let cachedHunks: Hunk[] | undefined;
+    let cachedCounts: { added: number; removed: number } | undefined;
+    const hunks = () => (cachedHunks ??= applied ? stepHunks(before, step) : []);
+    const counts = () => (cachedCounts ??= countLines(hunks(), before ?? ""));
     current.set(step.path, after);
     const list = versions.get(step.path) ?? [{ cursor: 0, content: null }];
     list.push({ cursor: index + 1, content: after });
     versions.set(step.path, list);
-    return {
+    frames.push({
       index,
       step,
       change: {
         path: step.path,
         before,
         after,
-        hunks,
+        get hunks() {
+          return hunks();
+        },
         applied,
-        ...countLines(hunks, before ?? ""),
+        get added() {
+          return counts().added;
+        },
+        get removed() {
+          return counts().removed;
+        },
       },
-    };
-  });
+    });
+    yield index + 1;
+  }
 
   const contentAt = (path: string, cursor: number): string | null => {
     const list = versions.get(path);
@@ -226,6 +242,7 @@ export function play(replay: Replay): Playback {
     const net = countLines(diffHunks(base ?? "", end ?? ""), base ?? "");
     added += net.added;
     removed += net.removed;
+    yield frames.length;
   }
   const changedFiles = paths.filter(
     (path) =>
@@ -245,4 +262,32 @@ export function play(replay: Replay): Playback {
     coverageAt,
     totals: { added, removed, files: changedFiles },
   };
+}
+
+/** Synchronous API retained for CLI and small embedded sessions. */
+export function play(replay: Replay): Playback {
+  const iterator = prepare(replay);
+  let result = iterator.next();
+  while (!result.done) result = iterator.next();
+  return result.value;
+}
+
+/** Cooperatively prepare long sessions without monopolizing the browser thread. */
+export async function preparePlayback(
+  replay: Replay,
+  onProgress: (steps: number) => void,
+  signal: AbortSignal,
+): Promise<Playback> {
+  const iterator = prepare(replay);
+  let slice = performance.now();
+  for (;;) {
+    signal.throwIfAborted();
+    const result = iterator.next();
+    if (result.done) return result.value;
+    if (performance.now() - slice >= 8) {
+      onProgress(result.value);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      slice = performance.now();
+    }
+  }
 }

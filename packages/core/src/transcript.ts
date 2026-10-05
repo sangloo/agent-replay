@@ -60,6 +60,8 @@ export interface Transcript {
   startedAt?: string;
   endedAt?: string;
   events: TranscriptEvent[];
+  /** Tool calls the adapter could not interpret; never claim these were replayed. */
+  unsupportedTools?: number;
 }
 
 /**
@@ -89,15 +91,15 @@ export function str(value: unknown): string | undefined {
  * for a log too large to hold as one string — past about 512 MB, a
  * JavaScript engine refuses to make the string at all.
  */
-export type Log = string | readonly string[];
+export type Log = string | Iterable<string>;
 
-export function logLines(log: Log): readonly string[] {
+export function logLines(log: Log): Iterable<string> {
   return typeof log === "string" ? log.split("\n") : log;
 }
 
 /** The log as one string — only for formats that are one JSON document. */
 export function logText(log: Log): string {
-  return typeof log === "string" ? log : log.join("\n");
+  return typeof log === "string" ? log : Array.from(log).join("\n");
 }
 
 /** Each non-empty line of a JSONL log that parses as an object. */

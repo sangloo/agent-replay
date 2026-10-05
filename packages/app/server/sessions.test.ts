@@ -118,3 +118,17 @@ describe("sessions from every agent", () => {
     expect(playback.contentAt("a.ts", playback.length)).toBe("bar()\n");
   });
 });
+
+it("streams JSONL across byte boundaries without retaining the whole log", async () => {
+  const { streamLog, readLog } = await import("./sessions.ts");
+  const file = join(temp, "stream.jsonl");
+  const lines = [
+    '{"type":"session_meta","payload":{"id":"stream","cwd":"/tmp"}}',
+    JSON.stringify({ text: "é".repeat(600_000) }),
+    '{"last":true}',
+  ];
+  writeFileSync(file, lines.join("\n"));
+  const source = streamLog(file);
+  expect([...source]).toEqual(readLog(file));
+  expect([...source]).toEqual(lines);
+});

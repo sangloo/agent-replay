@@ -1,3 +1,4 @@
+import { DeferredDetails } from "./deferred-details";
 import type { Frame, Replay } from "@agent-replay/core";
 import { BookOpen, ChevronRight, FilePlus2, FlaskConical } from "lucide-react";
 import * as React from "react";
@@ -218,13 +219,12 @@ export const LessonPanel = React.memo(function LessonPanel({
           ) {
             const explanation = frames[frame.index + 1];
             return (
-              <details
+              <DeferredDetails
+                summary={<>Included for completeness · {fileName(step.path)}</>}
+                summaryClassName="cursor-pointer leading-relaxed"
                 key={frame.index}
                 className="rounded-control border border-line p-3 text-xs text-text-mid"
               >
-                <summary className="cursor-pointer leading-relaxed">
-                  Included for completeness · {fileName(step.path)}
-                </summary>
                 <p className="my-2 font-mono text-2xs break-all">{step.path}</p>
                 <button
                   type="button"
@@ -243,7 +243,7 @@ export const LessonPanel = React.memo(function LessonPanel({
                     explained.
                   </p>
                 )}
-              </details>
+              </DeferredDetails>
             );
           }
           if (step.kind === "explain") {

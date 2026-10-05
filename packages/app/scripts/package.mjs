@@ -71,6 +71,29 @@ await build({
   ssr: { target: "node", noExternal: true },
 });
 
+// The capture worker is a separate Node entry point in installed packages.
+await build({
+  root: app,
+  configFile: false,
+  logLevel: "warn",
+  build: {
+    ssr: join(app, "server/capture-worker.ts"),
+    outDir: join(out, "server"),
+    emptyOutDir: false,
+    target: "node20",
+    minify: false,
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        format: "es",
+        entryFileNames: "capture-worker.mjs",
+        codeSplitting: false,
+      },
+    },
+  },
+  ssr: { target: "node", noExternal: true },
+});
+
 // 3. The launcher, the manifest, the readme and the licence.
 mkdirSync(join(out, "bin"));
 cpSync(join(app, "bin/replay.mjs"), join(out, "bin/replay.mjs"));

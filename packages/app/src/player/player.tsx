@@ -6,6 +6,8 @@ import {
   evidenceOf,
   isChange,
   play,
+  preparePlayback,
+  type Playback,
   sourceReferenceIndex,
   type SourceDestination,
   type Replay,
@@ -164,7 +166,7 @@ export interface PlayerProps {
   notice?: React.ReactNode;
 }
 
-export function Player({
+function ReadyPlayer({
   replay,
   study,
   source,
@@ -176,8 +178,9 @@ export function Player({
   saving,
   onBack,
   notice,
-}: PlayerProps) {
-  const playback = React.useMemo(() => play(replay), [replay]);
+  prepared,
+}: PlayerProps & { prepared?: Playback }) {
+  const playback = React.useMemo(() => prepared ?? play(replay), [replay, prepared]);
   // A course teaches: its lessons lead, and there is nothing to audit.
   const isCourse = replay.source === "course";
   const [storedFilter, setFilter] = usePersistent<Filter>(
@@ -1084,4 +1087,81 @@ export function Player({
 
 function Message({ children }: { children: React.ReactNode }) {
   return <p className="p-6 text-sm text-text-mid">{children}</p>;
+}
+
+/** Show the session immediately while indexing long histories in yielding slices. */
+export function Player(props: PlayerProps) {
+  const { replay } = props;
+  const large =
+    replay.steps.length > 200 ||
+    replay.steps.reduce(
+      (sum, step) =>
+        sum +
+        ("content" in step && typeof step.content === "string"
+          ? step.content.length
+          : 0),
+      0,
+    ) > 200_000 ||
+    Object.values(replay.files).reduce((sum, text) => sum + (text?.length ?? 0), 0) >
+      200_000;
+  return large ? (
+    <PreparingPlayer key={replay.endedAt} {...props} />
+  ) : (
+    <ReadyPlayer {...props} />
+  );
+}
+
+function PreparingPlayer(props: PlayerProps) {
+  const [prepared, setPrepared] = React.useState<Playback>();
+  const [count, setCount] = React.useState(0);
+  const [error, setError] = React.useState<string>();
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void preparePlayback(props.replay, setCount, controller.signal).then(
+        (result) => {
+          if (!controller.signal.aborted) setPrepared(result);
+        },
+        (reason: unknown) => {
+          if (!controller.signal.aborted)
+            setError(
+              reason instanceof Error
+                ? reason.message
+                : "Could not prepare this session.",
+            );
+        },
+      );
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [props.replay]);
+  if (prepared) return <ReadyPlayer {...props} prepared={prepared} />;
+  const intro = props.replay.steps.find((step) => step.kind === "lesson");
+  return (
+    <main className="min-h-dvh bg-surface-base p-8 text-text-high">
+      {props.onBack && (
+        <Button variant="ghost" size="sm" onClick={props.onBack}>
+          Back to lessons
+        </Button>
+      )}
+      <h1 className="mt-6 text-2xl font-semibold">{props.replay.title}</h1>
+      {intro?.kind === "lesson" && (
+        <p className="mt-4 max-w-2xl text-text-mid">{intro.goal}</p>
+      )}
+      <p role={error ? "alert" : "status"} className="mt-6 text-sm text-text-mid">
+        {error ??
+          `Preparing the player… ${count} of ${props.replay.steps.length} steps indexed`}
+      </p>
+      {!error && (
+        <progress
+          className="mt-3"
+          value={count}
+          max={Math.max(1, props.replay.steps.length)}
+          aria-label="Session preparation"
+        />
+      )}
+    </main>
+  );
 }

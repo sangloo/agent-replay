@@ -128,6 +128,38 @@ export function CourseMap({
         ),
       )
     : [selected];
+  // Bound the initial React tree even when searching across every chapter.
+  const pageKey = `${chapterId}:${query}`;
+  const [page, setPage] = React.useState({ key: pageKey, count: 24 });
+  const count = page.key === pageKey ? page.count : 24;
+  const matchedLessons = matching.flatMap((chapter) =>
+    chapter.lessons.filter((lesson) =>
+      terms.every((term) =>
+        `${lesson.id} ${lesson.title} ${lesson.goal} ${chapter.title}`
+          .toLowerCase()
+          .includes(term),
+      ),
+    ),
+  );
+  const displayed = new Set(matchedLessons.slice(0, count).map((lesson) => lesson.id));
+  const more = matchedLessons.length > count;
+  const sentinel = React.useRef<HTMLButtonElement>(null);
+  const loadMore = React.useCallback(
+    () => setPage({ key: pageKey, count: count + 24 }),
+    [pageKey, count],
+  );
+  React.useEffect(() => {
+    if (!more || !sentinel.current || typeof IntersectionObserver === "undefined")
+      return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) loadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(sentinel.current);
+    return () => observer.disconnect();
+  }, [more, loadMore]);
   const link = (lesson: (typeof all)[number]) => {
     const href = studyHref(
       {
@@ -221,85 +253,94 @@ export function CourseMap({
         {!matching.length && (
           <p role="status">No lessons match “{query}”. Try another topic.</p>
         )}
-        {matching.map((chapter) => (
-          <section key={chapter.id} className="study-section">
-            <p className="study-eyebrow">
-              Chapter {curriculum.chapters.indexOf(chapter) + 1}
-            </p>
-            <h2>{chapter.title}</h2>
-            <p>{chapter.description}</p>
-            <ol className="study-lessons">
-              {chapter.lessons
-                .filter((l) =>
-                  terms.every((t) =>
-                    `${l.id} ${l.title} ${l.goal} ${chapter.title}`
-                      .toLowerCase()
-                      .includes(t),
-                  ),
-                )
-                .map((l) => {
-                  const href = link(l),
-                    saved = progress[l.id];
-                  return (
-                    <li key={l.id}>
-                      <span className="study-number">{l.id}</span>
-                      <div>
-                        {href ? (
-                          <a className="study-lesson-title" href={href}>
-                            {l.title}
-                          </a>
-                        ) : (
-                          <span className="study-lesson-title">{l.title}</span>
-                        )}
-                        <p>{l.goal}</p>
-                        <div className="study-lesson-meta">
-                          <span
-                            className={
-                              saved?.reviewed ? "study-reviewed-label" : undefined
-                            }
-                          >
-                            {!href
-                              ? "Replay unavailable"
-                              : saved?.reviewed
-                                ? "Reviewed"
-                                : saved
-                                  ? "In progress"
-                                  : "Not started"}
-                          </span>
-                          {l.referenceOnly && <span>Reference collection</span>}
-                          {l.prerequisites.length > 0 && (
-                            <span>
-                              Before this:{" "}
-                              {l.prerequisites.map((id, i) => {
-                                const p = all.find((x) => x.id === id)!;
-                                return (
-                                  <React.Fragment key={id}>
-                                    {i ? ", " : ""}
-                                    <a href={link(p)} title={p.title}>
-                                      {id}
-                                    </a>
-                                  </React.Fragment>
-                                );
-                              })}
-                            </span>
+        {matching
+          .filter((chapter) =>
+            chapter.lessons.some((lesson) => displayed.has(lesson.id)),
+          )
+          .map((chapter) => (
+            <section key={chapter.id} className="study-section">
+              <p className="study-eyebrow">
+                Chapter {curriculum.chapters.indexOf(chapter) + 1}
+              </p>
+              <h2>{chapter.title}</h2>
+              <p>{chapter.description}</p>
+              <ol className="study-lessons">
+                {chapter.lessons
+                  .filter((lesson) => displayed.has(lesson.id))
+                  .map((l) => {
+                    const href = link(l),
+                      saved = progress[l.id];
+                    return (
+                      <li key={l.id}>
+                        <span className="study-number">{l.id}</span>
+                        <div>
+                          {href ? (
+                            <a className="study-lesson-title" href={href}>
+                              {l.title}
+                            </a>
+                          ) : (
+                            <span className="study-lesson-title">{l.title}</span>
                           )}
+                          <p>{l.goal}</p>
+                          <div className="study-lesson-meta">
+                            <span
+                              className={
+                                saved?.reviewed ? "study-reviewed-label" : undefined
+                              }
+                            >
+                              {!href
+                                ? "Replay unavailable"
+                                : saved?.reviewed
+                                  ? "Reviewed"
+                                  : saved
+                                    ? "In progress"
+                                    : "Not started"}
+                            </span>
+                            {l.referenceOnly && <span>Reference collection</span>}
+                            {l.prerequisites.length > 0 && (
+                              <span>
+                                Before this:{" "}
+                                {l.prerequisites.map((id, i) => {
+                                  const p = all.find((x) => x.id === id)!;
+                                  return (
+                                    <React.Fragment key={id}>
+                                      {i ? ", " : ""}
+                                      <a href={link(p)} title={p.title}>
+                                        {id}
+                                      </a>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      {href && (
-                        <a
-                          className="study-open"
-                          href={href}
-                          aria-label={`Open lesson ${l.id}`}
-                        >
-                          →
-                        </a>
-                      )}
-                    </li>
-                  );
-                })}
-            </ol>
-          </section>
-        ))}
+                        {href && (
+                          <a
+                            className="study-open"
+                            href={href}
+                            aria-label={`Open lesson ${l.id}`}
+                          >
+                            →
+                          </a>
+                        )}
+                      </li>
+                    );
+                  })}
+              </ol>
+            </section>
+          ))}
+        {more && (
+          <button
+            ref={sentinel}
+            type="button"
+            onClick={loadMore}
+            className="my-4 rounded-control px-4 py-2 text-sm text-text-mid hover:bg-hover"
+          >
+            Show more lessons ({Math.min(count, matchedLessons.length)} of{" "}
+            {matchedLessons.length})
+          </button>
+        )}
       </main>
     </div>
   );

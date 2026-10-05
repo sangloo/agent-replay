@@ -1,5 +1,5 @@
 import type { Frame, NoteLevel, Replay, Step } from "@agent-replay/core";
-import { cn } from "@/ui";
+import { cn, Tree } from "@/ui";
 import {
   BookOpen,
   FileMinus,
@@ -299,7 +299,7 @@ export interface StepListProps {
  * step on screen is open, what is done reads full and what is ahead reads
  * quiet. Click any step to go there.
  */
-export const StepList = React.memo(function StepList({
+const GroupedStepList = React.memo(function GroupedStepList({
   replay,
   frames,
   visible,
@@ -421,3 +421,54 @@ export const StepList = React.memo(function StepList({
     </div>
   );
 });
+
+/** Long sessions use the same keyboard-accessible windowed list as the file tree. */
+export const StepList = React.memo(function StepList(props: StepListProps) {
+  return props.visible.length > 300 ? (
+    <VirtualSteps {...props} />
+  ) : (
+    <GroupedStepList {...props} />
+  );
+});
+
+function VirtualSteps({ replay, frames, visible, cursor, onJump }: StepListProps) {
+  const lines = React.useMemo(
+    () =>
+      visible.map((index) => ({
+        id: String(index),
+        parentId: null,
+        label: `${index + 1}. ${rowLabel(frames[index]!)}`,
+      })),
+    [visible, frames],
+  );
+  const index = cursor - 1;
+  const current = frames[index];
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <button
+        type="button"
+        className="h-8 shrink-0 px-4 text-left text-xs text-text-low"
+        onClick={() => onJump(0)}
+      >
+        Base commit
+      </button>
+      <Tree
+        lines={lines}
+        expanded="all"
+        onToggle={() => {}}
+        selected={String(index)}
+        onSelect={(id) => onJump(Number(id) + 1)}
+        reveal={{ id: String(index), token: cursor }}
+        label="Session steps"
+        rowHeight={32}
+        className="min-h-0 flex-1"
+        icon={(row) => <StepIcon frame={frames[Number(row.id)]!} className="icon-sm" />}
+      />
+      {current && (
+        <div className="max-h-[40%] shrink-0 overflow-auto border-t border-line p-3">
+          <Detail frame={current} replay={replay} onJump={onJump} />
+        </div>
+      )}
+    </div>
+  );
+}

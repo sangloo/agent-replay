@@ -9,7 +9,7 @@ import * as React from "react";
 
 import { Button } from "@/ui";
 
-import { api, useLoad } from "./api";
+import { api, useLoad, useSession } from "./api";
 import { Library } from "./library";
 import { CourseLibrary, StandaloneCourseLibrary } from "./course-library";
 import { libraryHash, parseLibrary, type LibraryParams } from "./library-params";
@@ -142,13 +142,28 @@ function useNewerCourse(id: string, shown: Replay | undefined): Replay | undefin
   React.useEffect(() => {
     if (!isCourse) return;
     let alive = true;
-    const timer = setInterval(async () => {
-      const result = await api.replay(id);
-      if (alive && result.ok && result.data.endedAt !== endedAt) setNewer(result.data);
-    }, 4000);
+    let stamp: string | undefined;
+    let timer: ReturnType<typeof setTimeout>;
+    const check = async () => {
+      if (!alive) return;
+      if (document.visibilityState !== "hidden") {
+        const result = await api.replayStamp(id);
+        if (alive && result.ok) {
+          if (stamp !== undefined && stamp !== result.data.stamp) {
+            const fresh = await api.replay(id);
+            if (alive && fresh.ok) {
+              stamp = result.data.stamp;
+              if (fresh.data.endedAt !== endedAt) setNewer(fresh.data);
+            }
+          } else stamp = result.data.stamp;
+        }
+      }
+      if (alive) timer = setTimeout(() => void check(), 4000);
+    };
+    void check();
     return () => {
       alive = false;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [id, isCourse, endedAt]);
   return newer && newer.endedAt !== endedAt ? newer : undefined;
@@ -163,8 +178,7 @@ function SavedReplay({ id, at }: { id: string; at?: number }) {
   const newer = useNewerCourse(id, shown);
   if (loaded.state === "loading") return <Loading what="Opening the replay…" />;
   if (loaded.state === "failed") return <Failed message={loaded.message} />;
-  if (shown?.source === "course" && catalog.state === "loading")
-    return <Loading what="Opening the course map…" />;
+
   const course =
     catalog.state === "ready"
       ? catalog.data.courses.find((c) =>
@@ -212,12 +226,41 @@ function SavedReplay({ id, at }: { id: string; at?: number }) {
 }
 
 function LiveSession({ id, at }: { id: string; at?: number }) {
-  const loaded = useLoad(id, api.session);
+  const { loaded, progress } = useSession(id);
   const source = React.useMemo(() => ({ kind: "sessions" as const, id }), [id]);
   const [saving, setSaving] = React.useState(false);
   const [outcome, setOutcome] = React.useState<string>();
   if (loaded.state === "loading")
-    return <Loading what="Reading the session and the repository…" />;
+    return (
+      <Status>
+        <div className="flex max-w-2xl flex-col gap-4">
+          <h1 className="text-xl text-text-high">
+            {progress.title ?? "Opening session"}
+          </h1>
+          <p role="status">
+            {progress.message}
+            {progress.total !== undefined
+              ? ` · ${progress.loaded ?? 0} / ${progress.total} steps`
+              : "…"}
+          </p>
+          {progress.total !== undefined && (
+            <progress
+              value={progress.loaded ?? 0}
+              max={Math.max(1, progress.total)}
+              aria-label="Session download"
+            />
+          )}
+          {progress.preview && (
+            <p className="max-h-64 overflow-auto whitespace-pre-wrap">
+              {progress.preview}
+            </p>
+          )}
+          <Button variant="ghost" size="sm" onClick={back}>
+            Back to sessions
+          </Button>
+        </div>
+      </Status>
+    );
   if (loaded.state === "failed") return <Failed message={loaded.message} />;
   const { replay, repo, warnings, saved } = loaded.data;
   const save = async () => {

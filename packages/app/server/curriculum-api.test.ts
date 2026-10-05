@@ -112,3 +112,17 @@ it("reports malformed optional maps while preserving plain replay exports", asyn
   expect(exported.status).toBe(200);
   expect(exported.body.study).toBeUndefined();
 });
+
+it("loads course navigation without parsing replay bodies and offers cheap change detection", async () => {
+  writeFileSync(join(root, ".replays/curriculum.manifest"), JSON.stringify(manifest));
+  // A corrupt body must not take down the entire course map.
+  writeFileSync(join(root, ".replays/two.json"), "not valid JSON");
+  const catalog = await request("/curricula");
+  expect(catalog.body.data.courses[0].unavailable).toEqual([]);
+  const before = await request(`/replays/${idKey(root)}:two/stamp`);
+  expect(before.status).toBe(200);
+  writeFileSync(join(root, ".replays/two.json"), "a different body");
+  const after = await request(`/replays/${idKey(root)}:two/stamp`);
+  expect(after.body.data.stamp).not.toBe(before.body.data.stamp);
+  expect((await request(`/replays/${idKey(root)}:missing/stamp`)).status).toBe(404);
+});

@@ -1,3 +1,4 @@
+import { DeferredDetails } from "./deferred-details";
 /**
  * Teaching text, rendered: the Markdown a course's explanations are written
  * in, with `$…$` and `$$…$$` for mathematics.
@@ -191,17 +192,16 @@ function Blocks({ blocks }: { blocks: Block[] }) {
         switch (block.kind) {
           case "details":
             return (
-              <details
+              <DeferredDetails
+                summary={block.title}
+                summaryClassName="cursor-pointer font-medium focus-bar"
                 key={i}
                 className="my-3 rounded-control border border-line px-3 py-2"
               >
-                <summary className="cursor-pointer font-medium focus-bar">
-                  {block.title}
-                </summary>
                 <div className="mt-2">
                   <Blocks blocks={block.blocks} />
                 </div>
-              </details>
+              </DeferredDetails>
             );
           case "callout":
             return (
