@@ -15,6 +15,7 @@ import { CourseLibrary, StandaloneCourseLibrary } from "./course-library";
 import { libraryHash, parseLibrary, type LibraryParams } from "./library-params";
 import { Player } from "./player/player";
 import { PlayerSkeleton } from "./player/skeleton";
+import { ProgressVersion, useProgressSync } from "./progress-sync";
 
 type Route =
   | { page: "learn"; key?: string }
@@ -357,10 +358,21 @@ export function App() {
 
 function Routed() {
   const route = useRoute();
-  if (route.page === "learn") return <LearnRoute courseKey={route.key} />;
-  if (route.page === "replay")
-    return <SavedReplay key={route.id} id={route.id} at={route.at} />;
-  if (route.page === "session")
-    return <LiveSession key={route.id} id={route.id} at={route.at} />;
-  return <LibraryRoute params={route.params} />;
+  // Progress the local service kept, from another browser or port, arrives
+  // before a replay opens — so it can pick up where the reader was.
+  const { ready, version } = useProgressSync();
+  if (!ready) return null;
+  return (
+    <ProgressVersion.Provider value={version}>
+      {route.page === "learn" ? (
+        <LearnRoute courseKey={route.key} />
+      ) : route.page === "replay" ? (
+        <SavedReplay key={route.id} id={route.id} at={route.at} />
+      ) : route.page === "session" ? (
+        <LiveSession key={route.id} id={route.id} at={route.at} />
+      ) : (
+        <LibraryRoute params={route.params} />
+      )}
+    </ProgressVersion.Provider>
+  );
 }

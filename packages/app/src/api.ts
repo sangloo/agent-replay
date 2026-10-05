@@ -6,6 +6,8 @@
  */
 
 import type { Replay, StudyCatalog } from "@agent-replay/core";
+
+import type { StudyProgress } from "./study-progress";
 import * as React from "react";
 
 import type {
@@ -46,7 +48,7 @@ export interface ReplaySource {
   id: string;
 }
 
-type Method = "GET" | "POST" | "DELETE";
+type Method = "GET" | "POST" | "PUT" | "DELETE";
 
 // Listings answer in well under a second; a live capture reads a whole
 // session log and asks git about every file it touched.
@@ -57,6 +59,8 @@ async function call<T>(
   path: string,
   body?: unknown,
   timeout: keyof typeof TIMEOUT = "quick",
+  /** Finish even if the page is closing — the last save of a position. */
+  keepalive = false,
 ): Promise<ApiResult<T>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT[timeout]);
@@ -64,6 +68,7 @@ async function call<T>(
     // The one place the player reaches the network.
     const response = await fetch(path, {
       method,
+      keepalive,
       signal: controller.signal,
       headers: {
         Accept: "application/json",
@@ -123,6 +128,10 @@ export const api = {
   replayStamp: (id: string) =>
     call<{ stamp: string }>("GET", `/api/replays/${encodeURIComponent(id)}/stamp`),
   curricula: () => call<StudyCatalog>("GET", "/api/curricula"),
+  /** Where the reader is in each replay, as the local service keeps it. */
+  progress: () => call<Record<string, StudyProgress>>("GET", "/api/progress"),
+  saveProgress: (entries: Record<string, StudyProgress>, keepalive = false) =>
+    call<{ kept: number }>("PUT", "/api/progress", { entries }, "quick", keepalive),
   projects: () => call<Project[]>("GET", "/api/projects"),
   addProject: (path: string) => call<Project>("POST", "/api/projects", { path }),
   forgetProject: (root: string) =>

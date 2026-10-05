@@ -5,7 +5,8 @@
  * in a repo, `REPLAY_REPOS`), every repository an agent session ran in (a
  * session's directory, up to its git root), and folders someone added by
  * hand — remembered in `$XDG_CONFIG_HOME/replay/projects.json` (default
- * `~/.config`), the one file the tool writes outside a repository.
+ * `~/.config`). Besides that, the tool writes only `progress.json` there
+ * (see progress.ts) outside a repository.
  */
 
 import {

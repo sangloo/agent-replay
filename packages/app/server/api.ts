@@ -11,6 +11,8 @@
  *   POST   /api/projects              add a folder: { "path": "~/code/app" }
  *   DELETE /api/projects?root=        forget a folder added by hand
  *   GET    /api/folders?path=         the folders in a folder, to choose one
+ *   GET    /api/progress              where the reader is in each replay
+ *   PUT    /api/progress              merge positions in: { "entries": { key: … } }
  *
  *   GET    /api/replays               saved replays, in every known repository
  *   GET    /api/replays/:id           one saved replay
@@ -60,6 +62,12 @@ import {
   type CapturedPlace,
   type WholeCapture,
 } from "./session-stream.ts";
+import {
+  cleanProgress,
+  mergeProgress,
+  readProgress,
+  type Progress,
+} from "./progress.ts";
 import { findSession, listSessions } from "./sessions.ts";
 import {
   findSaved,
@@ -415,6 +423,19 @@ export function createHandler(options: ReplayApiOptions) {
   const SESSION = String.raw`\/sessions\/([\w.:-]+)`;
   const routes: [string, RegExp, Handler][] = [
     ["GET", /^\/projects$/, (): Project[] => projects()],
+    ["GET", /^\/progress$/, (): Record<string, Progress> => readProgress()],
+    [
+      "PUT",
+      /^\/progress$/,
+      (_, __, body): { kept: number } => {
+        const entries =
+          body && typeof body === "object" && "entries" in body
+            ? cleanProgress((body as { entries: unknown }).entries)
+            : undefined;
+        if (!entries) throw new Problem(400, "invalid_request", "Send { entries }.");
+        return { kept: Object.keys(mergeProgress(entries)).length };
+      },
+    ],
     [
       "GET",
       /^\/curricula$/,

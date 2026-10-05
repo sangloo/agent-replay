@@ -104,8 +104,8 @@ Three views of a file (`V`): **Change** — the change on screen, as a diff;
 view keeps playing: a change is always seen being made.
 
 The address carries the step (`#/session/<id>?at=42`), so a link opens on a
-moment. Without one, a replay reopens where you left it in this browser, and
-the lists show how far along each one is.
+moment. Without one, a replay reopens where you left it, and the lists show
+how far along each one is.
 
 The steps panel shows one turn at a time: the prompt on screen and its
 changes, every other turn as a single line saying what it asked and how much
@@ -244,8 +244,10 @@ any failure.
   outside the repository.
 
 The tool writes nothing but the replays you save (into a repository's
-`.replays/`), the files you export, and the folders you add
-(`~/.config/replay/projects.json`).
+`.replays/`), the files you export, the folders you add
+(`~/.config/replay/projects.json`), and where you are in each replay
+(`~/.config/replay/progress.json`: replay and lesson ids and step numbers, no
+content).
 
 ## How it works
 
@@ -336,8 +338,9 @@ A course can carry an optional `.replays/curriculum.manifest` alongside its save
 replays. The **Learn** tab then shows its map: the ordered chapters,
 prerequisites, a suggested next lesson, and each lesson done, in progress or not
 started. A lesson is done once you reach its end; **Mark as done** sets it by hand
-either way. Progress stays in this browser and is isolated by curriculum ID and
-revision. Existing replays need no migration.
+either way. Progress is isolated by curriculum ID and revision, and kept both in
+the browser and by `replay` itself (see Privacy), so another browser or port picks
+up where you were; an exported file keeps it in the browser that opens it. Existing replays need no migration.
 
 ```json
 {

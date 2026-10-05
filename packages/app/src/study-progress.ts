@@ -1,7 +1,8 @@
 import type { Replay, StudyContext } from "@agent-replay/core";
 
 /**
- * Where a reader is in a replay, kept in this browser so closing the tab and
+ * Where a reader is in a replay, kept in this browser (and, through
+ * `progress-sync.ts`, by the local service) so closing the tab and
  * coming back later picks up there — and so every list can say how far along
  * each replay is without loading it.
  */
@@ -72,12 +73,61 @@ export function readStudyProgress(key: string): StudyProgress | undefined {
   }
 }
 
+type Listener = (key: string, progress: StudyProgress) => void;
+const listeners = new Set<Listener>();
+
+/** Told of every save, so it can be shared beyond this browser. */
+export function onProgressSaved(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function saveStudyProgress(key: string, progress: StudyProgress) {
   try {
     localStorage.setItem(key, JSON.stringify(progress));
   } catch {
     /* Study remains usable without storage. */
   }
+  for (const listener of listeners) listener(key, progress);
+}
+
+const isProgressKey = (key: string) =>
+  key.startsWith("replay:study:") || key.startsWith("replay:position:");
+
+/** Every progress entry this browser holds. */
+export function allProgress(): Record<string, StudyProgress> {
+  const out: Record<string, StudyProgress> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)!;
+      if (!isProgressKey(key)) continue;
+      const progress = readStudyProgress(key);
+      if (progress) out[key] = progress;
+    }
+  } catch {
+    /* Nothing to share. */
+  }
+  return out;
+}
+
+/**
+ * Take in entries kept elsewhere — the local service's copy — where they are
+ * newer than this browser's. Answers how many were taken.
+ */
+export function adoptProgress(entries: Record<string, StudyProgress>): number {
+  let adopted = 0;
+  for (const [key, progress] of Object.entries(entries)) {
+    if (!isProgressKey(key)) continue;
+    const known = readStudyProgress(key);
+    if (known && known.updatedAt >= progress.updatedAt) continue;
+    try {
+      localStorage.setItem(key, JSON.stringify(progress));
+      adopted++;
+    } catch {
+      return adopted;
+    }
+  }
+  return adopted;
 }
 
 /** The furthest step reached, for old saves as well as new. */

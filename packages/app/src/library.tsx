@@ -26,6 +26,7 @@ import { AppHeader } from "./app-header";
 import { FolderDialog } from "./folder-dialog";
 import { ago, dayGroup, project as folderName, size } from "./labels";
 import { libraryHash, PAGE_SIZE, type LibraryParams } from "./library-params";
+import { ProgressVersion } from "./progress-sync";
 import { ProjectPicker } from "./project-picker";
 import { fractionOf, listedProgress, type StudyProgress } from "./study-progress";
 
@@ -191,6 +192,8 @@ export function Library({
   onParams: (next: LibraryParams) => void;
 }) {
   const { tab, agent, page, project } = params;
+  // Redraw when progress kept elsewhere arrives.
+  React.useContext(ProgressVersion);
   const [refresh, setRefresh] = React.useState(0);
   const projects = useLoad(`projects:${refresh}`, loadProjects);
   const known: readonly Project[] = projects.state === "ready" ? projects.data : [];

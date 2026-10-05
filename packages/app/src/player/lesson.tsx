@@ -348,7 +348,7 @@ function Finished({ study, replay }: { study?: StudyContext; replay: Replay }) {
         {study ? "Lesson complete" : `You have finished “${replay.title}”`}
       </p>
       <p className="text-xs text-text-mid">
-        Your progress is saved in this browser
+        Your progress is saved
         {href ? "." : " — the Learn page shows where you are in every course."}
       </p>
       {href && next ? (

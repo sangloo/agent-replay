@@ -23,6 +23,7 @@ import { api, rememberTitle, useLoad, type SavedListing } from "./api";
 import { AppHeader } from "./app-header";
 import { ago } from "./labels";
 import { ProgressMark } from "./library";
+import { ProgressVersion } from "./progress-sync";
 import {
   courseProgress,
   fractionOf,
@@ -42,6 +43,8 @@ const BATCH = 24;
  */
 export function CourseLibrary({ courseKey }: { courseKey?: string }) {
   const catalog = useLoad("curricula", api.curricula);
+  // Redraw when progress kept elsewhere arrives.
+  React.useContext(ProgressVersion);
   const courses = useLoad("courses", loadCourses);
   const course =
     courseKey && catalog.state === "ready"
@@ -148,7 +151,7 @@ function LearnHome({
         <p className="max-w-prose text-sm text-text-mid">
           Courses rebuild a repository from nothing, lesson by lesson — the real code
           arriving a piece at a time, with the explanations beside it. Where you are in
-          each is kept in this browser; a lesson is done once you reach its end.
+          each is kept for you; a lesson is done once you reach its end.
         </p>
       </header>
 
