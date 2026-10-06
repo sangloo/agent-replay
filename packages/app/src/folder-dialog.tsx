@@ -112,7 +112,7 @@ export function FolderDialog({
         </form>
         <ul
           aria-label="Folders"
-          className="h-72 overflow-auto rounded-panel bg-surface-low py-1"
+          className="h-72 overflow-auto rounded-panel bg-surface-inset py-1"
         >
           {listing?.folders.length === 0 ? (
             <li className="px-3 py-2 text-xs text-text-low">No folders inside.</li>

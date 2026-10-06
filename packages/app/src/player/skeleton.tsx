@@ -1,3 +1,4 @@
+import { buttonClass } from "@/ui";
 import { ArrowLeft, LoaderCircle } from "lucide-react";
 import * as React from "react";
 
@@ -45,7 +46,7 @@ export function PlayerSkeleton({
             <button
               type="button"
               onClick={onBack}
-              className="flex h-8 items-center gap-1.5 rounded-control px-2 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-4"
+              className={buttonClass({ variant: "ghost", size: "sm" })}
             >
               <ArrowLeft aria-hidden />
               {backLabel ?? "Back"}
@@ -59,7 +60,7 @@ export function PlayerSkeleton({
         )}
       </header>
       <div className="flex min-h-0 flex-1">
-        <div className="hidden w-64 shrink-0 flex-col gap-3 p-4 md:flex">
+        <div className="mr-1 ml-2 hidden w-64 shrink-0 flex-col gap-3 rounded-surface bg-surface-panel p-4 shadow-sheet md:flex">
           {widths.slice(0, 9).map((w, i) => (
             <span
               key={i}
@@ -68,7 +69,7 @@ export function PlayerSkeleton({
             />
           ))}
         </div>
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-base shadow-sheet md:rounded-surface">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-base shadow-sheet md:mx-1 md:rounded-surface">
           <div
             role="status"
             className="relative flex h-10 shrink-0 items-center gap-2 px-4 text-xs text-text-mid"
@@ -112,7 +113,7 @@ export function PlayerSkeleton({
             ) : null}
           </div>
         </main>
-        <div className="hidden w-80 shrink-0 flex-col gap-3 p-4 lg:flex">
+        <div className="mr-2 ml-1 hidden w-80 shrink-0 flex-col gap-3 rounded-surface bg-surface-panel p-4 shadow-sheet lg:flex">
           {widths.slice(3, 12).map((w, i) => (
             <span
               key={i}

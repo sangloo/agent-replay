@@ -2,7 +2,7 @@ import * as PopoverPrimitive from "@radix-ui/react-popover";
 import * as React from "react";
 
 import { cn } from "./cn";
-import { attachedPanel } from "./panel";
+import { attachedPanel } from "./styles";
 
 export const Popover = PopoverPrimitive.Root;
 export const PopoverTrigger = PopoverPrimitive.Trigger;
@@ -18,7 +18,11 @@ export function PopoverContent({
       <PopoverPrimitive.Content
         align={align}
         sideOffset={sideOffset}
-        className={cn(attachedPanel, "outline-none", className)}
+        className={cn(
+          attachedPanel,
+          "origin-(--radix-popover-content-transform-origin) outline-none",
+          className,
+        )}
         {...props}
       />
     </PopoverPrimitive.Portal>

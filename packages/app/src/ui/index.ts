@@ -14,7 +14,14 @@ export {
   DialogTitle,
 } from "./dialog";
 export { Input } from "./input";
-export { attachedItem, attachedPanel } from "./panel";
+export {
+  attachedItem,
+  attachedPanel,
+  buttonClass,
+  segmentClass,
+  type ButtonSize,
+  type ButtonVariant,
+} from "./styles";
 export { Popover, PopoverContent, PopoverTrigger } from "./popover";
 export { ResizablePanel } from "./resizable-panel";
 export { Scrubber, type ScrubStep, type Tone } from "./scrubber";
@@ -27,5 +34,6 @@ export {
 } from "./select";
 export { Kbd, ShortcutsSheet, type ShortcutGroup } from "./shortcuts";
 export { ThemeProvider } from "./theme";
-export { ACCENTS, useTheme, type Accent, type Theme } from "./use-theme";
+export { withTransition } from "./transition";
+export { useTheme, type Theme } from "./use-theme";
 export { Tree, type TreeLine, type TreeProps, type TreeRow } from "./tree";

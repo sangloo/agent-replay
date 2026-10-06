@@ -24,8 +24,6 @@
               : stored;
           document.documentElement.classList.toggle("dark", theme === "dark");
           document.documentElement.classList.toggle("light", theme === "light");
-          var accent = localStorage.getItem("accent");
-          if (accent) document.documentElement.setAttribute("data-accent", accent);
         } catch {}
       })();
     </script>

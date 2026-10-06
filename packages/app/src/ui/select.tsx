@@ -3,13 +3,12 @@ import { Check, ChevronDown } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "./cn";
-import { attachedPanel } from "./panel";
+import { attachedItem, attachedPanel } from "./styles";
 
 export const Select = SelectPrimitive.Root;
 export const SelectValue = SelectPrimitive.Value;
 
 const SIZE = {
-  xs: "h-6 px-2 text-xs",
   sm: "h-7 px-2.5 text-xs",
   md: "h-8 px-3 text-sm",
 } as const;
@@ -33,7 +32,7 @@ export function SelectTrigger({
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "inline-flex cursor-pointer items-center justify-between gap-1.5 rounded-control focus-bar data-[placeholder]:text-text-low [&>span]:truncate",
+        "inline-flex cursor-pointer items-center justify-between gap-1.5 rounded-control focus-bar transition-colors duration-fast data-[placeholder]:text-text-low [&>span]:truncate",
         VARIANT[variant],
         SIZE[size],
         className,
@@ -61,7 +60,7 @@ export function SelectContent({
         sideOffset={6}
         className={cn(
           attachedPanel,
-          "max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) overflow-hidden",
+          "max-h-(--radix-select-content-available-height) min-w-(--radix-select-trigger-width) origin-(--radix-select-content-transform-origin) overflow-hidden",
           className,
         )}
         {...props}
@@ -80,13 +79,14 @@ export function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex h-7 cursor-pointer items-center rounded-control pr-7 pl-2 text-xs outline-none select-none data-[disabled]:opacity-40 data-[highlighted]:bg-hover",
+        attachedItem,
+        "relative pr-8 data-[disabled]:opacity-40 data-[state=checked]:text-text-high",
         className,
       )}
       {...props}
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      <SelectPrimitive.ItemIndicator className="absolute right-2">
+      <SelectPrimitive.ItemIndicator className="absolute right-2.5">
         <Check aria-hidden className="size-3.5" />
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>

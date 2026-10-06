@@ -1,4 +1,4 @@
-import { cn } from "@/ui";
+import { cn, segmentClass } from "@/ui";
 import * as React from "react";
 
 export interface ChoiceOption<T extends string> {
@@ -39,12 +39,7 @@ export function Choice<T extends string>({
           aria-pressed={value === option.value}
           title={option.hint}
           onClick={() => onChange(option.value)}
-          className={cn(
-            "flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs whitespace-nowrap focus-bar",
-            value === option.value
-              ? "bg-active font-medium text-text-high"
-              : "text-text-low hover:bg-hover hover:text-text-mid",
-          )}
+          className={segmentClass(value === option.value)}
         >
           {option.label}
         </button>

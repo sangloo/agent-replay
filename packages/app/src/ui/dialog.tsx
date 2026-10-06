@@ -14,17 +14,17 @@ export function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content>) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-overlay bg-black/40" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-overlay animate-fade-in bg-black/40 backdrop-blur-[2px]" />
       <DialogPrimitive.Content
         className={cn(
-          "fixed top-1/2 left-1/2 z-overlay flex max-h-[85dvh] w-[calc(100vw-2rem)] max-w-lg -translate-1/2 flex-col gap-4 rounded-surface border border-line bg-surface-raised p-6 text-text-high shadow-modal outline-none",
+          "fixed top-1/2 left-1/2 z-overlay flex max-h-[85dvh] w-[calc(100vw-2rem)] max-w-lg -translate-1/2 animate-dialog-in flex-col gap-4 rounded-surface bg-surface-raised p-6 text-text-high shadow-modal outline-none",
           className,
         )}
         {...props}
       >
         {children}
         <DialogPrimitive.Close asChild>
-          <IconButton label="Close" size="xs" className="absolute top-3 right-3">
+          <IconButton label="Close" size="sm" className="absolute top-3 right-3">
             <X />
           </IconButton>
         </DialogPrimitive.Close>

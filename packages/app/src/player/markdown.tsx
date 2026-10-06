@@ -81,7 +81,7 @@ function SourceLink({ href, label }: { href: string; label: string }) {
       </button>
       <span
         role="tooltip"
-        className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-72 max-w-[80vw] rounded-control border border-line bg-surface-base p-3 text-xs text-text-mid shadow-lg group-focus-within:block group-hover:block"
+        className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-72 max-w-[80vw] rounded-panel bg-surface-raised p-3 text-xs text-text-mid shadow-popover group-focus-within:block group-hover:block"
       >
         <span className="block break-words">{caption}</span>
         {destination ? (
@@ -106,7 +106,7 @@ function Inline({ text }: { text: string }): React.ReactNode {
       out.push(
         <code
           key={key++}
-          className="rounded-[4px] bg-surface-mid px-1 py-px font-mono text-[0.9em]"
+          className="rounded-sm bg-active px-1 py-px font-mono text-[0.9em]"
         >
           {code.trim()}
         </code>,
@@ -161,7 +161,7 @@ function Code({ lang, text }: { lang: string; text: string }) {
   const language = lang ? (languageOf(`x.${lang}`) ?? lang) : undefined;
   const runs = React.useMemo(() => tokenize(text, language), [text, language]);
   return (
-    <pre className="my-3 overflow-x-auto rounded-control bg-surface-mid px-3 py-2.5 font-mono text-[12.5px] leading-5">
+    <pre className="my-3 overflow-x-auto rounded-panel bg-surface-inset px-3 py-2.5 font-mono text-xs leading-5">
       {paint(text, 0, runs).map((piece, i) =>
         piece.category ? (
           <span key={i} className={CATEGORY_CLASS[piece.category]}>
@@ -175,11 +175,12 @@ function Code({ lang, text }: { lang: string; text: string }) {
   );
 }
 
+// Headings by level, on the type scale: three steps, then body size.
 const HEADING = [
   "",
   "text-lg",
   "text-base",
-  "text-[15px]",
+  "text-sm",
   "text-sm",
   "text-sm",
   "text-sm",
@@ -196,7 +197,7 @@ function Blocks({ blocks }: { blocks: Block[] }) {
                 summary={block.title}
                 summaryClassName="cursor-pointer font-medium focus-bar"
                 key={i}
-                className="my-3 rounded-control border border-line px-3 py-2"
+                className="my-3 rounded-panel bg-surface-inset px-3 py-2"
               >
                 <div className="mt-2">
                   <Blocks blocks={block.blocks} />
@@ -209,7 +210,7 @@ function Blocks({ blocks }: { blocks: Block[] }) {
                 key={i}
                 aria-label={block.title}
                 className={cn(
-                  "my-3 rounded-control border-l-2 bg-surface-mid px-3 py-2",
+                  "my-3 rounded-control border-l-2 bg-surface-inset px-3 py-2",
                   block.tone === "warning" ? "border-warning" : "border-emphasis",
                 )}
               >
@@ -275,7 +276,7 @@ function Blocks({ blocks }: { blocks: Block[] }) {
           case "table":
             return (
               <div key={i} className="my-3 overflow-x-auto">
-                <table className="w-full border-collapse text-[13px]">
+                <table className="w-full border-collapse text-body">
                   <thead>
                     <tr>
                       {block.head.map((cell, j) => (

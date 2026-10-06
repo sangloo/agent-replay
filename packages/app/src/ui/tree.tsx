@@ -47,7 +47,7 @@ function Label({ text, highlight }: { text: string; highlight?: string }) {
   return (
     <>
       {text.slice(0, at)}
-      <mark className="rounded-[2px] bg-warning-subtle text-inherit">
+      <mark className="rounded-sm bg-warning-subtle text-inherit">
         {text.slice(at, at + highlight.length)}
       </mark>
       {text.slice(at + highlight.length)}
@@ -224,7 +224,7 @@ export function Tree({
                 else onSelect(row.id);
               }}
               className={cn(
-                "absolute inset-x-1.5 flex cursor-pointer items-center gap-1.5 rounded-control pr-1 text-[13px] select-none",
+                "absolute inset-x-1.5 flex cursor-pointer items-center gap-1.5 rounded-control pr-1 text-body transition-colors duration-fast select-none",
                 isSelected ? "bg-active text-text-high" : "hover:bg-hover",
                 isCursor && "outline outline-1 -outline-offset-1 outline-line-control",
               )}

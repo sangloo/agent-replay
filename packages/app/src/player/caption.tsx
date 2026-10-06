@@ -76,7 +76,7 @@ export const Caption = React.memo(function Caption({
         "Ran a command"
       );
       body = (
-        <p className="line-clamp-2 font-mono text-[12.5px] leading-5 whitespace-pre-wrap text-text-high">
+        <p className="line-clamp-2 font-mono text-xs leading-5 whitespace-pre-wrap text-text-high">
           <span className="text-text-low select-none">$ </span>
           {step.description ? (
             <>
@@ -189,7 +189,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div
       aria-live="polite"
-      className="mx-2 mb-2 flex h-20 shrink-0 flex-col gap-1 overflow-hidden rounded-panel bg-surface-low px-4 py-2.5"
+      className="mx-2 mb-2 flex h-20 shrink-0 animate-fade-in flex-col gap-1 overflow-hidden rounded-panel bg-surface-inset px-4 py-2.5"
     >
       {children}
     </div>
@@ -212,12 +212,7 @@ function Text({
   className?: string;
 }) {
   return (
-    <p
-      className={cn(
-        "line-clamp-2 max-w-[80ch] text-[13px] leading-5 text-text-high",
-        className,
-      )}
-    >
+    <p className={cn("line-clamp-2 max-w-[80ch] text-body text-text-high", className)}>
       {children}
     </p>
   );

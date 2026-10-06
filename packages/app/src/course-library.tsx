@@ -5,7 +5,7 @@ import {
   type CurriculumLesson,
   type StudyCourse,
 } from "@agent-replay/core";
-import { cn, Input } from "@/ui";
+import { buttonClass, cn, Input } from "@/ui";
 import {
   ArrowLeft,
   ArrowRight,
@@ -107,7 +107,9 @@ export function CourseLibrary({
       />
       <div
         id="study-content"
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-surface-base shadow-sheet sm:mx-2 sm:mb-2 sm:rounded-surface"
+        // A course map and the list of courses each rise in when opened.
+        key={courseKey ?? ""}
+        className="min-h-0 flex-1 animate-rise overflow-y-auto overscroll-contain bg-surface-base shadow-sheet sm:mx-2 sm:mb-2 sm:rounded-surface"
       >
         {catalog.state === "loading" || (courses.state === "loading" && !courseKey) ? (
           <p
@@ -236,7 +238,7 @@ function LearnHome({
       {resume ? (
         <section
           aria-label="Continue learning"
-          className="flex items-center gap-6 rounded-panel bg-surface-mid p-5"
+          className="flex items-center gap-6 rounded-panel bg-surface-inset p-5"
         >
           <span className="grid size-10 shrink-0 place-items-center rounded-full bg-emphasis-subtle text-emphasis">
             <BookOpen aria-hidden className="size-5" />
@@ -255,7 +257,7 @@ function LearnHome({
           <a
             href={resume.href}
             onClick={() => rememberTitle(resume.id, resume.title)}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-control bg-emphasis px-4 text-sm font-medium text-accent-text focus-bar hover:opacity-90"
+            className={buttonClass({ size: "lg" })}
           >
             Continue
             <ArrowRight aria-hidden className="size-4" />
@@ -280,7 +282,7 @@ function LearnHome({
                 <li key={map.key}>
                   <a
                     href={learnHash(project, map.key)}
-                    className="flex h-full flex-col gap-3 rounded-panel bg-surface-mid p-4 focus-bar transition-colors duration-fast hover:bg-active"
+                    className="flex h-full flex-col gap-3 rounded-panel bg-surface-inset p-4 focus-bar transition-[background-color,scale] duration-fast ease-out hover:bg-active active:scale-[0.99]"
                   >
                     <span className="flex items-start gap-2.5">
                       <GraduationCap
@@ -357,7 +359,7 @@ function LearnHome({
               </p>
               {maps.length ? null : (
                 <>
-                  <p className="rounded-control bg-surface-mid px-3 py-2 text-text-high">
+                  <p className="rounded-control bg-surface-inset px-3 py-2 text-text-high">
                     “Teach me this repository. Build it up from scratch as a course.”
                   </p>
                   <p className="text-xs text-text-low">
@@ -524,7 +526,7 @@ export function CourseMap({
       {next && link(next) ? (
         <section
           aria-label="Continue learning"
-          className="flex items-center gap-6 rounded-panel bg-surface-mid p-5"
+          className="flex items-center gap-6 rounded-panel bg-surface-inset p-5"
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <p className="text-2xs font-medium tracking-wide text-text-low uppercase">
@@ -542,15 +544,12 @@ export function CourseMap({
               {next.goal}
             </p>
           </div>
-          <a
-            href={link(next)}
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-control bg-emphasis px-4 text-sm font-medium text-accent-text focus-bar hover:opacity-90"
-          >
+          <a href={link(next)} className={buttonClass({ size: "lg" })}>
             {progress[next.id] ? "Resume lesson" : "Start lesson"} →
           </a>
         </section>
       ) : (
-        <p className="rounded-panel bg-surface-mid p-5 text-sm text-text-mid">
+        <p className="rounded-panel bg-surface-inset p-5 text-sm text-text-mid">
           {all.some((l) => link(l))
             ? "Every available lesson is done. Revisit any of them below."
             : "No lessons are available to open yet. The outline is below."}

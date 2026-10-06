@@ -1,4 +1,4 @@
-import { cn } from "@/ui";
+import { cn, segmentClass } from "@/ui";
 import type * as React from "react";
 
 import { AppearanceMenu } from "./appearance";
@@ -65,12 +65,7 @@ export function AppHeader({
             href={href(item.place)}
             title={item.hint}
             aria-current={item.place === place ? "page" : undefined}
-            className={cn(
-              "flex h-7 items-center rounded-full px-2.5 text-sm focus-bar sm:px-3",
-              item.place === place
-                ? "bg-active font-medium text-text-high"
-                : "text-text-low hover:bg-hover hover:text-text-high",
-            )}
+            className={segmentClass(item.place === place, "md")}
           >
             {item.label}
           </a>

@@ -233,7 +233,7 @@ function Warning({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1 rounded-control border-l-2 bg-surface-base px-3 py-2",
+        "flex flex-col gap-1 rounded-control border-l-2 bg-surface-inset px-3 py-2",
         tone === "danger" ? "border-danger-line" : "border-warning-line",
       )}
     >

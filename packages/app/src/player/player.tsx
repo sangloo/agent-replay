@@ -29,6 +29,7 @@ import * as React from "react";
 
 import {
   Button,
+  buttonClass,
   cn,
   IconButton,
   ResizablePanel,
@@ -883,7 +884,7 @@ function ReadyPlayer({
                   ? "Back to the course map"
                   : `Back to ${backLabel ?? "all replays"}`
               }
-              className="flex h-8 shrink-0 items-center gap-1.5 rounded-control px-2 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-4"
+              className={buttonClass({ variant: "ghost", size: "sm" })}
             >
               <ArrowLeft aria-hidden />
               <span className="hidden sm:inline">{backLabel ?? "Back"}</span>
@@ -943,7 +944,7 @@ function ReadyPlayer({
               href={`/api/${source.kind}/${encodeURIComponent(source.id)}/export`}
               download
               title="One HTML file that plays this replay anywhere, offline"
-              className="inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-3.5"
+              className={buttonClass({ variant: "ghost", size: "sm" })}
             >
               <Download aria-hidden />
               <span className="hidden md:inline">Export</span>
@@ -986,7 +987,7 @@ function ReadyPlayer({
           </p>
         ) : null}
         {resumeNote && !notice ? (
-          <p className="mx-2 mb-2 flex items-center gap-3 rounded-panel bg-emphasis-subtle px-4 py-2 text-xs text-text-mid">
+          <p className="mx-2 mb-2 flex animate-rise items-center gap-3 rounded-panel bg-emphasis-subtle px-4 py-2 text-xs text-text-mid">
             <span>
               Picked up where you left off
               {isCourse ? "" : ` — step ${position} of ${visible.length}`}.
@@ -1016,9 +1017,12 @@ function ReadyPlayer({
               max={560}
               label="Resize the files panel"
               {...filesWidth}
-              className="study-files player-panel left-0 bg-surface-low"
+              className="study-files player-panel left-0 animate-slide-in-left md:pr-1 md:pl-2"
             >
-              <nav aria-label="Files" className="h-full">
+              <nav
+                aria-label="Files"
+                className="h-full overflow-hidden bg-surface-panel shadow-sheet md:rounded-surface"
+              >
                 <FilesPanel
                   files={files}
                   repo={tree?.state === "ready" ? tree.data.paths : undefined}
@@ -1037,9 +1041,9 @@ function ReadyPlayer({
           {/* The code on its own sheet: the one thing in the frame that is not chrome. */}
           <main
             className={cn(
-              "study-code flex min-w-0 flex-1 flex-col overflow-hidden bg-surface-base shadow-sheet md:rounded-surface",
-              !filesOpen && "md:ml-2",
-              !stepsOpen && "md:mr-2",
+              "study-code flex min-w-0 flex-1 animate-fade-in flex-col overflow-hidden bg-surface-base shadow-sheet md:rounded-surface",
+              filesOpen ? "md:ml-1" : "md:ml-2",
+              stepsOpen ? "md:mr-1" : "md:mr-2",
             )}
           >
             <div className="relative flex h-10 shrink-0 items-center gap-3 px-2 text-xs">
@@ -1093,7 +1097,10 @@ function ReadyPlayer({
               )}
               <LiveBar store={transport.progress} live={shown.live} />
             </div>
-            {narrated ? null : <Caption replay={replay} frame={frame} onJump={jump} />}
+            {narrated ? null : (
+              // Keyed by step, so each one's words fade in rather than swap.
+              <Caption key={cursor} replay={replay} frame={frame} onJump={jump} />
+            )}
             <div className="min-h-0 flex-1">{body}</div>
           </main>
 
@@ -1104,9 +1111,12 @@ function ReadyPlayer({
               max={720}
               label="Resize the side panel"
               {...stepsWidth}
-              className="study-reading player-panel right-0 bg-surface-low"
+              className="study-reading player-panel right-0 animate-slide-in-right md:pr-2 md:pl-1"
             >
-              <aside aria-label="Session" className="flex h-full flex-col">
+              <aside
+                aria-label="Session"
+                className="flex h-full flex-col overflow-hidden bg-surface-panel shadow-sheet md:rounded-surface"
+              >
                 <div className="flex h-10 shrink-0 items-center gap-1 px-2">
                   <Choice
                     label="Side panel"
@@ -1398,7 +1408,7 @@ function ImagePreview({ src, note }: { src: string; note?: string }) {
         src={src}
         alt=""
         onError={() => setFailed(true)}
-        className="max-h-full max-w-full rounded-control object-contain shadow-popover"
+        className="max-h-full max-w-full animate-fade-in rounded-panel object-contain shadow-popover"
       />
       {note ? <figcaption className="text-2xs text-text-low">{note}</figcaption> : null}
     </figure>

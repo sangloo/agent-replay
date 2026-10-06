@@ -177,7 +177,7 @@ export const LessonPanel = React.memo(function LessonPanel({
                       setContents(false);
                     }}
                     className={cn(
-                      "flex w-full items-baseline gap-2 rounded-control px-1.5 py-1 text-left text-[13px] focus-bar hover:bg-hover",
+                      "flex w-full items-baseline gap-2 rounded-control px-1.5 py-1 text-left text-body focus-bar hover:bg-hover",
                       i === at ? "font-medium text-text-high" : "text-text-mid",
                     )}
                   >
@@ -243,7 +243,7 @@ export const LessonPanel = React.memo(function LessonPanel({
                 summary={<>Included for completeness · {fileName(step.path)}</>}
                 summaryClassName="cursor-pointer leading-relaxed"
                 key={frame.index}
-                className="rounded-control border border-line p-3 text-xs text-text-mid"
+                className="rounded-panel bg-surface-inset p-3 text-xs text-text-mid"
               >
                 <p className="my-2 font-mono text-2xs break-all">{step.path}</p>
                 <button
@@ -348,7 +348,7 @@ function Finished({ study, replay }: { study?: StudyContext; replay: Replay }) {
   const next = index >= 0 ? all[index + 1] : undefined;
   const href = study && next ? studyHref(study, next) : undefined;
   return (
-    <div className="mt-2 flex flex-col gap-2 rounded-panel border border-success-line bg-success-subtle p-4">
+    <div className="mt-2 flex animate-rise flex-col gap-2 rounded-panel bg-success-subtle p-4">
       <p className="flex items-center gap-2 text-sm font-medium text-success-ink">
         <CircleCheck aria-hidden className="size-4" />
         {study ? "Lesson complete" : `You have finished “${replay.title}”`}

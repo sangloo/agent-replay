@@ -45,6 +45,9 @@ export const Scrubber = React.memo(function Scrubber({
   const track = React.useRef<HTMLDivElement>(null);
   const [hover, setHover] = React.useState<{ position: number; x: number }>();
   const dragging = React.useRef(false);
+  // While dragged, the playhead follows the pointer exactly; otherwise it
+  // glides to each new step.
+  const [held, setHeld] = React.useState(false);
   const n = steps.length;
   const ratio = n ? cursor / n : 0;
 
@@ -94,6 +97,7 @@ export const Scrubber = React.memo(function Scrubber({
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         dragging.current = true;
+        setHeld(true);
         onJump(positionAt(event.clientX).position);
       }}
       onPointerMove={(event) => {
@@ -103,13 +107,20 @@ export const Scrubber = React.memo(function Scrubber({
       }}
       onPointerUp={() => {
         dragging.current = false;
+        setHeld(false);
       }}
       onPointerLeave={() => setHover(undefined)}
       className="group relative flex h-8 cursor-pointer touch-none items-center rounded-control px-2 focus-bar outline-none"
     >
-      <div ref={track} className="relative h-1 w-full rounded-full bg-line-high">
+      <div
+        ref={track}
+        className="relative h-1 w-full rounded-full bg-line-high transition-[height] duration-fast group-hover:h-1.5"
+      >
         <div
-          className="absolute inset-y-0 left-0 rounded-full bg-text-mid"
+          className={cn(
+            "absolute inset-y-0 left-0 rounded-full bg-text-mid",
+            !held && "transition-[width] duration-base ease-out",
+          )}
           style={{ width: `${ratio * 100}%` }}
         />
         {marks.map((mark, i) => (
@@ -125,14 +136,19 @@ export const Scrubber = React.memo(function Scrubber({
         ))}
         <span
           aria-hidden
-          className="absolute top-1/2 size-3.5 -translate-1/2 rounded-full border-2 border-surface-base bg-emphasis shadow-popover"
+          className={cn(
+            "absolute top-1/2 size-3.5 -translate-1/2 rounded-full border-2 border-surface-base bg-emphasis shadow-popover group-hover:scale-115",
+            held
+              ? "transition-[scale] duration-fast"
+              : "transition-[left,scale] duration-base ease-out",
+          )}
           style={{ left: `${ratio * 100}%` }}
         />
       </div>
       {hover ? (
         <span
           aria-hidden
-          className="pointer-events-none absolute bottom-full mb-1 max-w-72 -translate-x-1/2 truncate rounded-control border border-line bg-surface-raised px-2 py-1 text-xs text-text-high shadow-popover"
+          className="pointer-events-none absolute bottom-full mb-1 max-w-72 -translate-x-1/2 animate-fade-in truncate rounded-control bg-surface-raised px-2 py-1 text-xs text-text-high shadow-popover"
           style={{ left: hover.x + 8 }}
         >
           <span className="text-text-low tabular-nums">{hover.position}</span>{" "}

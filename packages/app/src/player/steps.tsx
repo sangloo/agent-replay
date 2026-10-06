@@ -104,14 +104,14 @@ const Row = React.memo(function Row({
   return (
     <li
       ref={rowRef as React.Ref<HTMLLIElement>}
-      className={cn("mx-1.5 rounded-panel", place === "current" && "bg-active")}
+      className={cn("mx-1.5 rounded-control", place === "current" && "bg-active")}
     >
       <button
         type="button"
         onClick={() => onJump(frame.index + 1)}
         aria-current={place === "current" ? "step" : undefined}
         className={cn(
-          "flex h-8 w-full items-center gap-2.5 rounded-panel px-2.5 text-left text-xs focus-bar",
+          "flex h-8 w-full items-center gap-2.5 rounded-control px-2.5 text-left text-body focus-bar transition-colors duration-fast",
           place !== "current" && "hover:bg-hover",
           place === "ahead" ? "text-text-low" : "text-text-high",
         )}
@@ -213,7 +213,7 @@ function Detail({
       : -1;
   const causeStep = cause >= 0 ? replay.steps[cause] : undefined;
   return (
-    <div className="flex flex-col gap-3 px-2.5 pt-1 pb-4 pl-9 text-sm">
+    <div className="flex animate-rise flex-col gap-3 px-2.5 pt-1 pb-4 pl-9 text-sm">
       <p className="text-2xs text-text-low">
         <span className="font-mono">{when(step.at, replay)}</span>
         {step.agent !== "main" ? " · subagent" : ""}
@@ -254,7 +254,7 @@ function PromptDetail({ frame, replay }: { frame: Frame; replay: Replay }) {
   const { step } = frame;
   const note = replay.notes[step.id];
   return (
-    <div className="flex flex-col gap-3 text-sm">
+    <div className="flex animate-rise flex-col gap-3 text-sm">
       {step.kind === "lesson" ? (
         <p className="font-medium text-text-high">{step.title}</p>
       ) : null}
@@ -299,13 +299,13 @@ function Body({ step, replay }: { step: Step; replay: Replay }) {
           {step.description ? (
             <p className="text-text-mid">{step.description}</p>
           ) : null}
-          <pre className="overflow-x-auto rounded-control bg-surface-low p-2 font-mono text-2xs whitespace-pre-wrap text-text-high">
+          <pre className="overflow-x-auto rounded-control bg-surface-inset p-2 font-mono text-2xs whitespace-pre-wrap text-text-high">
             $ {step.command}
           </pre>
           {step.output ? (
             <pre
               className={cn(
-                "max-h-60 overflow-auto rounded-control bg-surface-low p-2 font-mono text-2xs whitespace-pre-wrap",
+                "max-h-60 overflow-auto rounded-control bg-surface-inset p-2 font-mono text-2xs whitespace-pre-wrap",
                 step.failed ? "text-danger-ink" : "text-text-mid",
               )}
             >
@@ -437,7 +437,7 @@ const GroupedStepList = React.memo(function GroupedStepList({
         type="button"
         onClick={() => onJump(0)}
         className={cn(
-          "mx-1.5 flex h-8 items-center gap-2.5 rounded-panel px-2.5 text-left text-xs focus-bar",
+          "mx-1.5 flex h-8 items-center gap-2.5 rounded-control px-2.5 text-left text-body focus-bar",
           cursor === 0 ? "bg-active text-text-high" : "text-text-low hover:bg-hover",
         )}
       >
@@ -488,8 +488,8 @@ const GroupedStepList = React.memo(function GroupedStepList({
                 className={cn(
                   "flex flex-col",
                   isCurrent
-                    ? "mx-1.5 rounded-panel bg-active"
-                    : "bg-surface-low px-1.5",
+                    ? "mx-1.5 rounded-control bg-active"
+                    : "bg-surface-panel px-1.5",
                   // The open turn's question stays in view above its steps;
                   // on screen itself it reads in full, so it scrolls.
                   open && !isCurrent && "sticky top-0 z-raised",
@@ -501,7 +501,7 @@ const GroupedStepList = React.memo(function GroupedStepList({
                     type="button"
                     onClick={() => onJump(group.prompt!.index + 1)}
                     aria-current={isCurrent ? "step" : undefined}
-                    className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-panel py-2 pl-2.5 text-left focus-bar"
+                    className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-control py-2 pl-2.5 text-left focus-bar"
                   >
                     <span className="text-2xs text-text-low">
                       {group.prompt.step.kind === "lesson"
@@ -514,7 +514,7 @@ const GroupedStepList = React.memo(function GroupedStepList({
                     {isCurrent ? null : (
                       <span
                         className={cn(
-                          "text-xs",
+                          "text-body",
                           open ? "line-clamp-3" : "line-clamp-1",
                           isLesson && "font-medium",
                           reached ? "text-text-high" : "text-text-low",
@@ -648,7 +648,7 @@ function More({
     <button
       type="button"
       onClick={onClick}
-      className="flex h-8 w-full items-center rounded-panel px-2.5 pl-9 text-left text-2xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
+      className="flex h-8 w-full items-center rounded-control px-2.5 pl-9 text-left text-2xs text-text-low focus-bar hover:bg-hover hover:text-text-mid"
     >
       Show {children}
     </button>
@@ -693,7 +693,7 @@ function VirtualSteps({ replay, frames, visible, cursor, onJump }: StepListProps
       <button
         type="button"
         className={cn(
-          "mx-1.5 flex h-8 shrink-0 items-center gap-2.5 rounded-panel px-2.5 text-left text-xs focus-bar",
+          "mx-1.5 flex h-8 shrink-0 items-center gap-2.5 rounded-control px-2.5 text-left text-body focus-bar",
           cursor === 0 ? "bg-active text-text-high" : "text-text-low hover:bg-hover",
         )}
         onClick={() => onJump(0)}
@@ -714,7 +714,7 @@ function VirtualSteps({ replay, frames, visible, cursor, onJump }: StepListProps
         icon={(row) => <StepIcon frame={frames[Number(row.id)]!} className="icon-sm" />}
       />
       {current && (
-        <div className="max-h-[40%] shrink-0 overflow-auto bg-surface-base p-3">
+        <div className="max-h-[40%] shrink-0 overflow-auto bg-surface-inset p-3">
           <Detail frame={current} replay={replay} onJump={onJump} />
         </div>
       )}

@@ -15,12 +15,14 @@ import { ancestorIds, DIR_ID, FILE_ID, treeLines } from "./tree-lines";
  */
 type Mark = "added" | "modified" | "deleted" | "ahead" | "example";
 
+// Names stay ink: the status letter beside each says what happened, so a
+// changed tree reads as text, not as a field of colour.
 const INK: Record<Mark, string> = {
-  added: "text-success-ink",
-  modified: "text-warning-ink",
-  deleted: "text-danger-ink",
+  added: "",
+  modified: "",
+  deleted: "text-text-low",
   ahead: "text-text-low",
-  example: "text-info-ink",
+  example: "text-text-mid",
 };
 
 const LETTER: Record<Exclude<Mark, "ahead">, string> = {
@@ -370,7 +372,7 @@ const FileTree = React.memo(function FileTree({
               <span
                 title={NAME[mark]}
                 className={cn(
-                  "grid h-4 min-w-4 place-items-center rounded-[4px] px-0.5 font-mono text-2xs font-medium",
+                  "grid h-4 min-w-4 place-items-center rounded-sm px-0.5 font-mono text-2xs font-medium",
                   PILL[mark],
                 )}
               >

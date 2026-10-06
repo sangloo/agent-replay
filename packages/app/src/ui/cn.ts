@@ -6,9 +6,10 @@ import { extendTailwindMerge } from "tailwind-merge";
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
-      "font-size": [{ text: ["2xs", "code"] }],
-      rounded: [{ rounded: ["control", "panel", "surface"] }],
-      shadow: [{ shadow: ["popover", "modal"] }],
+      // Without these, `text-body` reads as a colour and a later `text-text-high` drops it.
+      "font-size": [{ text: ["2xs", "body", "code"] }],
+      rounded: [{ rounded: ["sm", "control", "panel", "surface"] }],
+      shadow: [{ shadow: ["sheet", "popover", "modal"] }],
     },
   },
 });

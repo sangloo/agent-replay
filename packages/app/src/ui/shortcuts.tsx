@@ -28,7 +28,7 @@ const KEY_NAME: Record<string, string> = {
 
 export function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-[4px] border border-line-high bg-surface-low px-1.5 font-sans text-2xs font-medium text-text-mid">
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-sm bg-active px-1.5 font-sans text-2xs font-medium text-text-mid">
       {children}
     </kbd>
   );

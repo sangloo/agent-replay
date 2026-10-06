@@ -3,7 +3,6 @@ import * as React from "react";
 
 import {
   attachedItem,
-  cn,
   IconButton,
   Kbd,
   Popover,
@@ -20,10 +19,6 @@ import { AppearanceControls } from "../appearance";
  */
 export function PlayerMenu({ onShortcuts }: { onShortcuts: () => void }) {
   const [open, setOpen] = React.useState(false);
-  const item = cn(
-    attachedItem,
-    "flex h-8 w-full items-center gap-2.5 px-2.5 text-left text-xs text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-3.5 [&_svg]:shrink-0",
-  );
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -34,7 +29,7 @@ export function PlayerMenu({ onShortcuts }: { onShortcuts: () => void }) {
       <PopoverContent align="end" className="w-60">
         <button
           type="button"
-          className={item}
+          className={attachedItem}
           onClick={() => {
             setOpen(false);
             onShortcuts();

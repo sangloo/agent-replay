@@ -2,7 +2,7 @@ import { curriculumLessons, studyHref, type StudyContext } from "@agent-replay/c
 import { ArrowLeft, ArrowRight, Check, ChevronRight } from "lucide-react";
 import * as React from "react";
 
-import { cn } from "@/ui";
+import { buttonClass, cn } from "@/ui";
 
 import { courseProgress } from "./study-progress";
 
@@ -73,7 +73,7 @@ export function CourseOutline({
                         href={href}
                         aria-current={current ? "step" : undefined}
                         className={cn(
-                          "flex items-baseline gap-2 rounded-control px-2 py-1.5 text-[13px] focus-bar",
+                          "flex items-baseline gap-2 rounded-control px-2 py-1.5 text-body focus-bar",
                           current
                             ? "bg-emphasis-subtle text-text-high"
                             : "text-text-mid hover:bg-hover hover:text-text-high",
@@ -91,7 +91,7 @@ export function CourseOutline({
                         )}
                       </a>
                     ) : (
-                      <span className="flex items-baseline gap-2 px-2 py-1.5 text-[13px] text-text-low">
+                      <span className="flex items-baseline gap-2 px-2 py-1.5 text-body text-text-low">
                         <span className="w-6 shrink-0 text-2xs tabular-nums">
                           {l.id}
                         </span>
@@ -155,12 +155,14 @@ export function LessonActions({
       aria-label="Lesson controls"
     >
       <button
-        className={cn(
-          "study-reviewed inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium whitespace-nowrap focus-bar [&_svg]:size-3.5",
-          done
-            ? "bg-success-subtle text-success-ink"
-            : "bg-hover text-text-mid hover:bg-active hover:text-text-high",
-        )}
+        className={buttonClass({
+          variant: "secondary",
+          size: "sm",
+          className: cn(
+            "study-reviewed",
+            done && "bg-success-subtle text-success-ink hover:bg-success-subtle",
+          ),
+        })}
         type="button"
         aria-label={done ? "Done" : "Mark as done"}
         aria-pressed={done}
@@ -172,7 +174,12 @@ export function LessonActions({
       </button>
       {previousHref && previous && (
         <a
-          className="study-previous inline-flex size-7 items-center justify-center rounded-control text-text-mid focus-bar hover:bg-hover hover:text-text-high [&_svg]:size-4"
+          className={buttonClass({
+            variant: "ghost",
+            size: "sm",
+            icon: true,
+            className: "study-previous",
+          })}
           href={previousHref}
           aria-label="Previous lesson"
           title={previous.title}
@@ -182,12 +189,11 @@ export function LessonActions({
       )}
       {nextHref && next && (
         <a
-          className={cn(
-            "study-next inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium whitespace-nowrap focus-bar [&_svg]:size-3.5",
-            done
-              ? "bg-emphasis text-accent-text hover:opacity-90"
-              : "text-text-mid hover:bg-hover hover:text-text-high",
-          )}
+          className={buttonClass({
+            variant: done ? "primary" : "ghost",
+            size: "sm",
+            className: "study-next",
+          })}
           href={nextHref}
           aria-label="Next lesson"
           title={next.title}

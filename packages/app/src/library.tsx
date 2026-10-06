@@ -166,7 +166,7 @@ function Rows({ items }: { items: readonly Item[] }) {
                   data-row
                   href={item.href}
                   onClick={() => rememberTitle(item.id, item.title)}
-                  className="flex items-center gap-4 rounded-control px-3 py-2.5 focus-bar hover:bg-hover"
+                  className="flex items-center gap-4 rounded-control px-3 py-2.5 focus-bar transition-colors duration-fast hover:bg-hover"
                 >
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate text-sm text-text-high">
@@ -393,7 +393,10 @@ export function Library({
               ) : items.length === 0 ? (
                 <p className="max-w-prose py-3 text-sm text-text-low">{empty}</p>
               ) : (
-                <Rows items={items} />
+                // A new tab, page or project rises in; a search narrows in place.
+                <div key={`${tab}|${page}|${project}`} className="animate-rise">
+                  <Rows items={items} />
+                </div>
               )}
             </div>
 

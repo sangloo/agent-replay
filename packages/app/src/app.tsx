@@ -7,7 +7,7 @@ import {
 
 import * as React from "react";
 
-import { Button } from "@/ui";
+import { Button, withTransition } from "@/ui";
 
 import { api, knownTitle, useLoad, useSession } from "./api";
 import { Library } from "./library";
@@ -51,10 +51,28 @@ function parse(hash: string): Route {
   return { page: "library", params: parseLibrary(search) };
 }
 
+/** Which page a hash is — the place, and the replay it opens — not its search. */
+function pageOf(hash: string): string {
+  const route = parse(hash);
+  return route.page === "replay" || route.page === "session"
+    ? `${route.page}:${route.id}`
+    : route.page === "learn"
+      ? `learn:${route.key ?? ""}`
+      : "library";
+}
+
 function useRoute(): Route {
   const [hash, setHash] = React.useState(() => window.location.hash);
+  const shown = React.useRef(hash);
   React.useEffect(() => {
-    const onChange = () => setHash(window.location.hash);
+    const onChange = () => {
+      const next = window.location.hash;
+      const moved = pageOf(next) !== pageOf(shown.current);
+      shown.current = next;
+      // Going to another page cross-fades; a search or a filter updates in place.
+      if (moved) withTransition(() => setHash(next));
+      else setHash(next);
+    };
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
