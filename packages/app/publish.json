@@ -1,6 +1,6 @@
 {
   "name": "agent-replay-studio",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Replay what a coding agent did, change by change \u2014 Claude Code, Codex and Gemini CLI sessions, and git history.",
   "keywords": [
     "claude-code",
